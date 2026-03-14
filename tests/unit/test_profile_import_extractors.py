@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from app.services.profile_import_extractors import WebsiteImportExtractor, _extract_same_domain_links
+from app.services.profile_import_extractors import (
+    WebsiteImportExtractor,
+    _extract_same_domain_links,
+    _fetch_html_default,
+    _normalize_url,
+)
 
 
 def test_extract_same_domain_links_filters_external_urls() -> None:
@@ -49,3 +54,17 @@ def test_website_extractor_crawls_same_domain_pages_only() -> None:
     assert len(results) == 2
     assert all(item.url.startswith("https://portfolio.example.dev") for item in results)
     assert all("outside.dev" not in url for url in visited)
+
+
+def test_normalize_url_accepts_bare_domain_input() -> None:
+    """URL normalization should support inputs without explicit scheme."""
+
+    assert _normalize_url("example.com") == "https://example.com"
+    assert _normalize_url("example.com/path") == "https://example.com/path"
+
+
+def test_fetch_html_default_handles_tls_verification_fallback() -> None:
+    """Default fetch should succeed in environments requiring insecure TLS fallback."""
+
+    html = _fetch_html_default("https://example.com")
+    assert "example" in html.lower()

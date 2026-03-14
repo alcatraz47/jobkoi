@@ -59,14 +59,25 @@ def register_profile_import_page(
                         getattr(event, "type", "application/octet-stream")
                         or "application/octet-stream"
                     )
-                    content = getattr(event, "content", None)
-                    if hasattr(content, "read"):
-                        pending_upload["bytes"] = content.read()
+                    pending_upload["bytes"] = _read_upload_bytes(getattr(event, "content", None))
+                    if pending_upload["bytes"]:
+                        ui.notify(f"Loaded file: {pending_upload['name']}", color="info")
                     else:
-                        pending_upload["bytes"] = b""
-                    ui.notify(f"Loaded file: {pending_upload['name']}", color="info")
+                        ui.notify("Could not read uploaded file bytes.", color="negative")
 
-                ui.upload(on_upload=on_upload, auto_upload=True).props("accept=.pdf,.docx")
+                def on_upload_rejected(_: Any) -> None:
+                    """Notify when browser upload constraints reject a file."""
+
+                    ui.notify(
+                        "Upload rejected. Use PDF/DOCX and keep size under 20 MB.",
+                        color="negative",
+                    )
+
+                ui.upload(
+                    on_upload=on_upload,
+                    on_rejected=on_upload_rejected,
+                    auto_upload=True,
+                ).props("accept=.pdf,.docx max-file-size=20971520")
 
                 async def import_cv_action() -> None:
                     """Submit CV import request."""
@@ -444,3 +455,33 @@ def _set_conflict_resolution_note(
 
     draft = import_state.conflict_resolutions.setdefault(conflict_id, ConflictResolutionDraft())
     draft.resolution_note = note or None
+
+
+def _read_upload_bytes(content: Any) -> bytes:
+    """Read upload event content into bytes.
+
+    Args:
+        content: NiceGUI upload event content object.
+
+    Returns:
+        Raw uploaded bytes, or empty bytes when unavailable.
+    """
+
+    if content is None:
+        return b""
+
+    if isinstance(content, (bytes, bytearray)):
+        return bytes(content)
+
+    if hasattr(content, "read"):
+        try:
+            raw = content.read()
+        except Exception:
+            return b""
+
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        if isinstance(raw, str):
+            return raw.encode("utf-8", errors="ignore")
+
+    return b""

@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import re
 import zipfile
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
 from app.domain.job_text import normalize_text
+
+_DEFAULT_FETCH_HEADERS: dict[str, str] = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
+}
 
 
 class ProfileImportExtractionError(Exception):
@@ -265,18 +274,79 @@ def _strip_xml_tags(xml_text: str) -> str:
 
 
 def _fetch_html_default(url: str) -> str:
-    """Fetch one HTML page via HTTP."""
+    """Fetch one HTML page via HTTP.
+
+    Uses TLS verification by default and retries once without certificate
+    verification when the failure is specifically a certificate validation issue.
+
+    Args:
+        url: URL to fetch.
+
+    Returns:
+        Response HTML body.
+
+    Raises:
+        ProfileImportExtractionError: If the page cannot be fetched.
+    """
 
     try:
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        return _fetch_html_with_verify(url=url, verify=True)
+    except ProfileImportExtractionError as exc:
+        if not _is_tls_verification_error(exc):
+            raise
+
+    return _fetch_html_with_verify(url=url, verify=False)
+
+
+def _fetch_html_with_verify(*, url: str, verify: bool) -> str:
+    """Fetch HTML with explicit TLS verification behavior.
+
+    Args:
+        url: URL to fetch.
+        verify: TLS verification toggle.
+
+    Returns:
+        Response HTML body.
+
+    Raises:
+        ProfileImportExtractionError: If HTTP request fails.
+    """
+
+    try:
+        with httpx.Client(
+            timeout=20.0,
+            follow_redirects=True,
+            headers=_DEFAULT_FETCH_HEADERS,
+            verify=verify,
+        ) as client:
             response = client.get(url)
     except httpx.HTTPError as exc:
-        raise ProfileImportExtractionError(f"Failed to fetch URL: {url}") from exc
+        raise ProfileImportExtractionError(f"Failed to fetch URL: {url} ({exc})") from exc
 
     if response.status_code >= 400:
         raise ProfileImportExtractionError(f"URL returned HTTP {response.status_code}: {url}")
 
     return response.text
+
+
+def _is_tls_verification_error(error: BaseException) -> bool:
+    """Return whether an exception likely indicates TLS verification failure.
+
+    Args:
+        error: Exception instance.
+
+    Returns:
+        True when error text matches certificate verification failures.
+    """
+
+    lowered = str(error).lower()
+    patterns = (
+        "certificate verify failed",
+        "self signed certificate",
+        "unable to get local issuer certificate",
+        "tlsv",
+    )
+    return any(pattern in lowered for pattern in patterns)
 
 
 def _is_trafilatura_available() -> bool:
@@ -337,12 +407,30 @@ def _extract_same_domain_links(*, html: str, base_url: str, domain: str) -> list
 
 
 def _normalize_url(url: str) -> str:
-    """Normalize and validate URL for crawling."""
+    """Normalize and validate URL for crawling.
 
-    parsed = urlparse(url.strip())
+    Supports bare domains by defaulting to ``https://``.
+
+    Args:
+        url: Raw URL input.
+
+    Returns:
+        Normalized absolute URL or empty string when invalid.
+    """
+
+    candidate = url.strip()
+    if not candidate:
+        return ""
+
+    parsed = urlparse(candidate)
+    if not parsed.scheme:
+        parsed = urlparse(f"https://{candidate}")
+
     if parsed.scheme not in {"http", "https"}:
         return ""
     if not parsed.netloc:
+        return ""
+    if any(char.isspace() for char in parsed.netloc):
         return ""
 
     normalized = parsed._replace(fragment="", query="")
