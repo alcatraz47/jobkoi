@@ -63,6 +63,11 @@ class ProfileImportApi:
 
         return self._client.post_json(f"/profile-imports/{run_id}/apply", {})
 
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        """Delete one import run and remove it from listing."""
+
+        return self._client.delete_json(f"/profile-imports/{run_id}")
+
     def reject_run(self, run_id: str, note: str | None = None) -> dict[str, Any]:
         """Reject import run and keep master profile unchanged."""
 

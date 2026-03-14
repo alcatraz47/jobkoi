@@ -100,3 +100,52 @@ def test_detect_import_language_falls_back_to_en_or_de() -> None:
 
     assert detect_import_language("Ich habe Erfahrung mit Python und Docker.") in {"en", "de"}
     assert detect_import_language("I build APIs with FastAPI and SQLAlchemy.") in {"en", "de"}
+
+
+def test_builder_parses_company_name_containing_analytics() -> None:
+    """Builder should parse experience rows even when company includes Analytics."""
+
+    text_input = """
+    Mina Carter
+    Data Engineer
+    mina.carter@example.com
+
+    Experience
+    Data Engineer at Northwind Analytics
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+
+    assert draft.experiences
+    assert draft.experiences[0].company == "Northwind Analytics"
+    assert draft.experiences[0].title == "Data Engineer"
+
+
+def test_builder_keeps_ci_cd_as_single_skill() -> None:
+    """Skills parser should keep CI/CD as one canonical skill token."""
+
+    text_input = """
+    Victor Stone
+
+    Skills
+    Docker, Kubernetes, Python, CI/CD
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+    names = [item.skill_name for item in draft.skills]
+
+    assert "CI/CD" in names
+
+
+def test_builder_avoids_false_inline_experience_matches_from_word_fragments() -> None:
+    """Inline experience detection should not trigger on generic prose containing 'at'."""
+
+    text_input = """
+    Arfan Example
+    Building data platforms and automation systems at scale for logistics teams.
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+
+    assert draft.experiences == []
+

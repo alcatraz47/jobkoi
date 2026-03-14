@@ -61,6 +61,63 @@ class PromptFactory:
         )
         return PromptBundle(system_prompt=system_prompt, user_prompt=user_prompt)
 
+    def build_profile_import_extraction_prompt(
+        self,
+        *,
+        source_type: str,
+        source_label: str,
+        detected_language: str,
+        raw_text: str,
+    ) -> PromptBundle:
+        """Create prompt bundle for structured profile import extraction.
+
+        Args:
+            source_type: Source type such as ``cv_document``.
+            source_label: Human-readable source label.
+            detected_language: Detected source language code.
+            raw_text: Extracted source text.
+
+        Returns:
+            Prompt bundle for structured profile extraction.
+        """
+
+        system_prompt = (
+            "You extract structured profile facts from resume text. "
+            "Return strict JSON only. Do not include markdown. "
+            "Never invent facts, metrics, responsibilities, education, or skills. "
+            "Only output values explicitly supported by the provided text. "
+            "If uncertain, omit the field."
+        )
+
+        user_prompt = (
+            "Task: extract profile data from the provided import text.\n"
+            f"Source type: {source_type}\n"
+            f"Source label: {source_label}\n"
+            f"Language: {detected_language}\n"
+            "Rules:\n"
+            "1) Use only provided text evidence.\n"
+            "2) Do not infer missing facts.\n"
+            "3) Use concise values (company name only, title only, skill label only).\n"
+            "4) Keep at most 20 experiences, 10 educations, 40 skills.\n"
+            "5) For scalar fields include evidence objects when possible.\n"
+            "Output schema:\n"
+            "{\n"
+            "  \"full_name\": {\"value\": str, \"source_excerpt\": str | null, \"source_locator\": str | null} | null,\n"
+            "  \"email\": {\"value\": str, \"source_excerpt\": str | null, \"source_locator\": str | null} | null,\n"
+            "  \"phone\": {\"value\": str, \"source_excerpt\": str | null, \"source_locator\": str | null} | null,\n"
+            "  \"location\": {\"value\": str, \"source_excerpt\": str | null, \"source_locator\": str | null} | null,\n"
+            "  \"headline\": {\"value\": str, \"source_excerpt\": str | null, \"source_locator\": str | null} | null,\n"
+            "  \"summary\": {\"value\": str, \"source_excerpt\": str | null, \"source_locator\": str | null} | null,\n"
+            "  \"experiences\": [{\"company\": str | null, \"title\": str | null, \"start_date\": str | null, \"end_date\": str | null, \"description\": str | null, \"source_excerpt\": str | null, \"source_locator\": str | null}],\n"
+            "  \"educations\": [{\"institution\": str | null, \"degree\": str | null, \"field_of_study\": str | null, \"start_date\": str | null, \"end_date\": str | null, \"source_excerpt\": str | null, \"source_locator\": str | null}],\n"
+            "  \"skills\": [{\"skill_name\": str, \"level\": str | null, \"category\": str | null, \"source_excerpt\": str | null, \"source_locator\": str | null}]\n"
+            "}\n"
+            "Source text:\n"
+            f"{raw_text}"
+        )
+
+        return PromptBundle(system_prompt=system_prompt, user_prompt=user_prompt)
+
     def build_cv_rewrite_prompt(
         self,
         *,

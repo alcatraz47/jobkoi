@@ -22,11 +22,12 @@ from app.domain.profile_import_types import (
 
 _EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_PATTERN = re.compile(r"\+?[0-9][0-9\s().-]{6,}[0-9]")
-_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z' .-]{2,80}$")
+_NAME_PATTERN = re.compile(r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ' .-]{2,80}$")
 _YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
-_SKILLS_SPLIT_PATTERN = re.compile(r"[,|/•;]")
+_SKILLS_SPLIT_PATTERN = re.compile(r"[,|•;]|\s+/\s+")
 
 _EXPERIENCE_SEPARATORS = (" at ", " bei ", " @ ")
+_EXPERIENCE_DASH_SEPARATORS = (" - ", " – ", " — ", " | ")
 _COMPANY_CUTOFF_MARKERS = (
     " delivering ",
     " responsible ",
@@ -34,30 +35,45 @@ _COMPANY_CUTOFF_MARKERS = (
     " where ",
     " using ",
     " focused on ",
+    " integrating ",
+    " building ",
+    " led ",
+    " leading ",
+    " currently ",
 )
 
 _SECTION_ALIASES: dict[str, tuple[str, ...]] = {
     "experience": (
         "experience",
         "work experience",
+        "professional experience",
+        "career history",
+        "work history",
         "employment",
         "berufserfahrung",
         "erfahrung",
     ),
     "education": (
         "education",
+        "education & training",
         "studies",
         "ausbildung",
         "bildung",
+        "bildungsgang",
         "academic",
     ),
     "skills": (
         "skills",
+        "core skills",
+        "technical skills",
+        "skills & tools",
         "technologies",
         "tools",
+        "tech stack",
         "faehigkeiten",
         "fahigkeiten",
         "kenntnisse",
+        "kompetenzen",
     ),
 }
 
@@ -67,10 +83,61 @@ _DEGREE_MARKERS = (
     "phd",
     "msc",
     "bsc",
+    "bs",
+    "ba",
+    "ma",
+    "mtech",
+    "btech",
+    "b.eng",
+    "m.eng",
     "diplom",
     "degree",
     "mba",
 )
+
+_COMPANY_HINTS = (
+    "gmbh",
+    "ag",
+    "inc",
+    "llc",
+    "ltd",
+    "corp",
+    "corporation",
+    "company",
+    "technologies",
+    "systems",
+    "labs",
+    "lab",
+    "institute",
+    "university",
+    "college",
+    "group",
+)
+
+_ROLE_HINTS = (
+    "engineer",
+    "developer",
+    "scientist",
+    "analyst",
+    "manager",
+    "architect",
+    "consultant",
+    "specialist",
+    "researcher",
+    "intern",
+    "lead",
+    "head",
+    "director",
+    "ingenieur",
+    "ingenieurin",
+    "entwickler",
+    "entwicklerin",
+    "berater",
+    "beraterin",
+    "forscher",
+    "forscherin",
+)
+
 
 _SKILL_KEYWORDS: dict[str, str] = {
     "python": "Python",
@@ -120,13 +187,16 @@ def build_imported_profile_from_text(
     """
 
     lines = _normalized_lines(text)
+    lines_with_breaks = _normalized_lines_with_breaks(text)
+
     email = _extract_email(text)
     phone = _extract_phone(text)
     full_name = _extract_full_name(lines)
     headline = _extract_headline(lines, full_name)
+    location = _extract_location(lines, full_name=full_name, headline=headline)
     summary = _extract_summary(lines)
 
-    experiences, educations, skills, unmapped = _extract_section_entries(lines, source_locator)
+    experiences, educations, skills, unmapped = _extract_section_entries(lines_with_breaks, source_locator)
 
     if not skills:
         skills = _extract_inline_skills(lines, source_locator)
@@ -139,12 +209,12 @@ def build_imported_profile_from_text(
         full_name=full_name,
         email=email,
         phone=phone,
-        location=None,
+        location=location,
         headline=headline,
         summary=summary,
         experiences=experiences,
         educations=educations,
-        skills=skills,
+        skills=_deduplicate_skills(skills),
         unmapped_candidates=_deduplicate_unmapped(unmapped),
     )
 
@@ -212,7 +282,7 @@ def flatten_imported_profile_to_fields(
                     suggested_value=value,
                     confidence_score=confidence,
                     source_locator=item.source_locator,
-                    source_excerpt=item.description or f"{item.title} at {item.company}",
+                    source_excerpt=item.source_excerpt or item.description or f"{item.title} at {item.company}",
                     sort_order=order,
                 )
             )
@@ -237,7 +307,7 @@ def flatten_imported_profile_to_fields(
                     suggested_value=value,
                     confidence_score=confidence,
                     source_locator=item.source_locator,
-                    source_excerpt=f"{item.degree} at {item.institution}",
+                    source_excerpt=item.source_excerpt or f"{item.degree} at {item.institution}",
                     sort_order=order,
                 )
             )
@@ -260,7 +330,7 @@ def flatten_imported_profile_to_fields(
                     suggested_value=value,
                     confidence_score=confidence,
                     source_locator=item.source_locator,
-                    source_excerpt=item.skill_name,
+                    source_excerpt=item.source_excerpt or item.skill_name,
                     sort_order=order,
                 )
             )
@@ -288,6 +358,56 @@ def _normalized_lines(text: str) -> list[str]:
     normalized = text.replace("\r", "\n")
     lines = [normalize_text(part) for part in normalized.split("\n")]
     return [line for line in lines if line]
+
+
+def _normalized_lines_with_breaks(text: str) -> list[str]:
+    """Return normalized lines preserving section breaks as empty strings."""
+
+    normalized = text.replace("\r", "\n")
+    rows: list[str] = []
+    for raw in normalized.split("\n"):
+        cleaned = normalize_text(raw)
+        if cleaned:
+            rows.append(cleaned)
+            continue
+
+        if rows and rows[-1] != "":
+            rows.append("")
+
+    while rows and rows[0] == "":
+        rows.pop(0)
+    while rows and rows[-1] == "":
+        rows.pop()
+
+    return rows
+
+
+def _extract_location(
+    lines: list[str],
+    *,
+    full_name: str | None,
+    headline: str | None,
+) -> str | None:
+    """Extract probable location from header-like lines."""
+
+    for line in lines[:14]:
+        lowered = line.lower()
+        if not line or line == full_name or line == headline:
+            continue
+        if _EMAIL_PATTERN.search(line) or _PHONE_PATTERN.search(line):
+            continue
+        if _looks_like_section_heading(line) or _is_noise_heading_line(lowered):
+            continue
+        if len(line) > 90:
+            continue
+        if "http" in lowered or "linkedin" in lowered or "github" in lowered:
+            continue
+
+        # Prefer city-country patterns: "Dortmund, Germany".
+        if "," in line and not any(char in line for char in {"@", "#", "{"}):
+            return line
+
+    return None
 
 
 def _extract_email(text: str) -> str | None:
@@ -395,96 +515,224 @@ def _extract_section_entries(
     unmapped: list[ImportedUnmappedCandidate] = []
 
     active_section = ""
+    section_buffer: list[str] = []
+
     for line in lines:
+        if line == "":
+            _append_section_buffer(
+                section=active_section,
+                lines=section_buffer,
+                source_locator=source_locator,
+                experiences=experiences,
+                educations=educations,
+                skills=skills,
+                unmapped=unmapped,
+            )
+            section_buffer = []
+            continue
+
         section, remainder = _detect_section_and_remainder(line)
         if section:
+            _append_section_buffer(
+                section=active_section,
+                lines=section_buffer,
+                source_locator=source_locator,
+                experiences=experiences,
+                educations=educations,
+                skills=skills,
+                unmapped=unmapped,
+            )
+            section_buffer = []
             active_section = section
             if remainder:
-                _append_section_content(
-                    section=section,
-                    line=remainder,
-                    source_locator=source_locator,
-                    experiences=experiences,
-                    educations=educations,
-                    skills=skills,
-                    unmapped=unmapped,
-                )
+                section_buffer.append(remainder)
             continue
 
-        if not active_section:
-            continue
+        if active_section:
+            section_buffer.append(line)
 
-        _append_section_content(
-            section=active_section,
-            line=line,
-            source_locator=source_locator,
-            experiences=experiences,
-            educations=educations,
-            skills=skills,
-            unmapped=unmapped,
-        )
+    _append_section_buffer(
+        section=active_section,
+        lines=section_buffer,
+        source_locator=source_locator,
+        experiences=experiences,
+        educations=educations,
+        skills=skills,
+        unmapped=unmapped,
+    )
 
     return experiences, educations, _deduplicate_skills(skills), unmapped
 
 
-def _append_section_content(
+def _append_section_buffer(
     *,
     section: str,
-    line: str,
+    lines: list[str],
     source_locator: str | None,
     experiences: list[ImportedExperienceDraft],
     educations: list[ImportedEducationDraft],
     skills: list[ImportedSkillDraft],
     unmapped: list[ImportedUnmappedCandidate],
 ) -> None:
-    """Append parsed section content to draft collections."""
+    """Parse one buffered section chunk and append parsed content."""
 
-    if section == "experience":
-        item = _parse_experience_line(line, source_locator)
-        if item is not None:
-            experiences.append(item)
-            return
-        if _should_track_unmapped_line(line):
-            unmapped.append(
-                ImportedUnmappedCandidate(
-                    text=line,
-                    section_hint="experience",
-                    reason="could_not_parse_experience",
-                    source_locator=source_locator,
-                )
-            )
-        return
-
-    if section == "education":
-        item = _parse_education_line(line, source_locator)
-        if item is not None:
-            educations.append(item)
-            return
-        if _should_track_unmapped_line(line):
-            unmapped.append(
-                ImportedUnmappedCandidate(
-                    text=line,
-                    section_hint="education",
-                    reason="could_not_parse_education",
-                    source_locator=source_locator,
-                )
-            )
+    if not section or not lines:
         return
 
     if section == "skills":
-        parsed_skills = _parse_skill_line(line, source_locator)
-        if parsed_skills:
-            skills.extend(parsed_skills)
-            return
-        if _should_track_unmapped_line(line):
-            unmapped.append(
-                ImportedUnmappedCandidate(
-                    text=line,
-                    section_hint="skills",
-                    reason="could_not_parse_skill",
-                    source_locator=source_locator,
+        for line in lines:
+            parsed_skills = _parse_skill_line(line, source_locator)
+            if parsed_skills:
+                skills.extend(parsed_skills)
+                continue
+
+            if _should_track_unmapped_line(line):
+                unmapped.append(
+                    ImportedUnmappedCandidate(
+                        text=line,
+                        section_hint="skills",
+                        reason="could_not_parse_skill",
+                        source_locator=source_locator,
+                    )
                 )
+        return
+
+    if section == "experience":
+        block_item = _parse_experience_block(lines, source_locator)
+        if block_item is not None:
+            experiences.append(block_item)
+            return
+
+        parsed_any = False
+        for line in lines:
+            item = _parse_experience_line(line, source_locator)
+            if item is not None:
+                parsed_any = True
+                experiences.append(item)
+
+        if not parsed_any:
+            for line in lines:
+                if _should_track_unmapped_line(line):
+                    unmapped.append(
+                        ImportedUnmappedCandidate(
+                            text=line,
+                            section_hint="experience",
+                            reason="could_not_parse_experience",
+                            source_locator=source_locator,
+                        )
+                    )
+        return
+
+    if section == "education":
+        block_item = _parse_education_block(lines, source_locator)
+        if block_item is not None:
+            educations.append(block_item)
+            return
+
+        parsed_any = False
+        for line in lines:
+            item = _parse_education_line(line, source_locator)
+            if item is not None:
+                parsed_any = True
+                educations.append(item)
+
+        if not parsed_any:
+            for line in lines:
+                if _should_track_unmapped_line(line):
+                    unmapped.append(
+                        ImportedUnmappedCandidate(
+                            text=line,
+                            section_hint="education",
+                            reason="could_not_parse_education",
+                            source_locator=source_locator,
+                        )
+                    )
+
+
+def _parse_experience_block(lines: list[str], source_locator: str | None) -> ImportedExperienceDraft | None:
+    """Parse one multi-line experience block into one structured entry."""
+
+    for line in lines:
+        parsed = _parse_experience_line(line, source_locator)
+        if parsed is not None:
+            description = normalize_text(" ".join(lines))
+            return ImportedExperienceDraft(
+                company=parsed.company,
+                title=parsed.title,
+                start_date=parsed.start_date,
+                end_date=parsed.end_date,
+                description=description[:1200] if description else parsed.description,
+                source_locator=source_locator,
+                source_excerpt=description[:1200] if description else (parsed.source_excerpt or parsed.description),
             )
+
+    if len(lines) < 2:
+        return None
+
+    first = normalize_text(lines[0])
+    second = _truncate_company_segment(normalize_text(lines[1]))
+    joined = normalize_text(" ".join(lines))
+    start_date, end_date = _extract_date_range(joined)
+
+    if _is_plausible_experience_title(first) and _is_plausible_company_name(second):
+        return ImportedExperienceDraft(
+            company=second,
+            title=first,
+            start_date=start_date,
+            end_date=end_date,
+            description=joined[:1200],
+            source_locator=source_locator,
+            source_excerpt=joined[:1200],
+        )
+
+    if _is_plausible_company_name(first) and _is_plausible_experience_title(second):
+        return ImportedExperienceDraft(
+            company=first,
+            title=second,
+            start_date=start_date,
+            end_date=end_date,
+            description=joined[:1200],
+            source_locator=source_locator,
+            source_excerpt=joined[:1200],
+        )
+
+    return None
+
+
+def _parse_education_block(lines: list[str], source_locator: str | None) -> ImportedEducationDraft | None:
+    """Parse one multi-line education block into one structured entry."""
+
+    for line in lines:
+        parsed = _parse_education_line(line, source_locator)
+        if parsed is not None:
+            return parsed
+
+    if len(lines) < 2:
+        return None
+
+    first = normalize_text(lines[0])
+    second = normalize_text(lines[1])
+    if not _looks_like_degree_text(first):
+        return None
+
+    institution = normalize_text(re.split(r"[,;|]", second, maxsplit=1)[0])
+    if not _is_plausible_company_name(institution):
+        return None
+
+    joined = normalize_text(" ".join(lines))
+    start_date, end_date = _extract_date_range(joined)
+    if start_date is None:
+        year_match = _YEAR_PATTERN.search(joined)
+        start_date = f"{year_match.group(0)}-01-01" if year_match else None
+
+    return ImportedEducationDraft(
+        institution=institution,
+        degree=first,
+        start_date=start_date,
+        end_date=end_date,
+        source_locator=source_locator,
+        source_excerpt=joined[:1200],
+    )
 
 
 def _extract_inline_skills(lines: list[str], source_locator: str | None) -> list[ImportedSkillDraft]:
@@ -497,7 +745,7 @@ def _extract_inline_skills(lines: list[str], source_locator: str | None) -> list
             continue
         for keyword, label in _SKILL_KEYWORDS.items():
             if keyword in lowered:
-                candidates.append(ImportedSkillDraft(skill_name=label, source_locator=source_locator))
+                candidates.append(ImportedSkillDraft(skill_name=label, source_locator=source_locator, source_excerpt=line))
 
     return _deduplicate_skills(candidates)
 
@@ -513,12 +761,13 @@ def _detect_section_and_remainder(line: str) -> tuple[str, str]:
     """
 
     normalized = normalize_text(line)
+    normalized = normalized.strip("•*- ")
     lowered = normalized.lower()
 
     for section, aliases in _SECTION_ALIASES.items():
         for alias in aliases:
             alias_lower = alias.lower()
-            if lowered == alias_lower:
+            if lowered == alias_lower or lowered == f"{alias_lower}:":
                 return section, ""
 
             for delimiter in (":", "-", "|"):
@@ -598,22 +847,28 @@ def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExp
     """Parse one experience line into structured fields."""
 
     normalized = normalize_text(line)
-    if not normalized:
+    if not normalized or len(normalized) > 400:
         return None
+
+    title = ""
+    company = ""
 
     lower_line = normalized.lower()
     separator = next((value for value in _EXPERIENCE_SEPARATORS if value in lower_line), None)
-    if separator is None:
-        return None
+    if separator is not None:
+        split_pattern = re.compile(re.escape(separator), re.IGNORECASE)
+        segments = split_pattern.split(normalized, maxsplit=1)
+        if len(segments) == 2:
+            title = normalize_text(segments[0])
+            company = _truncate_company_segment(normalize_text(segments[1]))
 
-    split_pattern = re.compile(re.escape(separator), re.IGNORECASE)
-    segments = split_pattern.split(normalized, maxsplit=1)
-    if len(segments) != 2:
-        return None
+    if not title or not company:
+        parsed_dash = _parse_experience_dash_or_pipe_line(normalized)
+        if parsed_dash is not None:
+            title, company = parsed_dash
 
-    title = normalize_text(segments[0])
-    company_raw = normalize_text(segments[1])
-    company = _truncate_company_segment(company_raw)
+    if not title or not company:
+        return None
 
     if not _is_plausible_experience_title(title):
         return None
@@ -629,7 +884,57 @@ def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExp
         end_date=end_date,
         description=normalized,
         source_locator=source_locator,
+        source_excerpt=normalized,
     )
+
+
+def _parse_experience_dash_or_pipe_line(line: str) -> tuple[str, str] | None:
+    """Parse dash/pipe separated line into title/company tuple."""
+
+    for separator in _EXPERIENCE_DASH_SEPARATORS:
+        if separator not in line:
+            continue
+
+        left_raw, right_raw = line.split(separator, maxsplit=1)
+        left = _truncate_company_segment(normalize_text(left_raw))
+        right = _truncate_company_segment(normalize_text(right_raw))
+        if not left or not right:
+            continue
+
+        left_hint = _company_hint_score(left)
+        right_hint = _company_hint_score(right)
+
+        if left_hint > right_hint:
+            title = right
+            company = left
+        elif right_hint > left_hint:
+            title = left
+            company = right
+        else:
+            title = left
+            company = right
+
+        if _is_plausible_experience_title(title) and _is_plausible_company_name(company):
+            return title, company
+
+        if _is_plausible_experience_title(company) and _is_plausible_company_name(title):
+            return company, title
+
+    return None
+
+
+def _contains_role_keyword(value: str) -> bool:
+    """Return whether title text contains common role keywords."""
+
+    lowered = value.lower()
+    return any(token in lowered for token in _ROLE_HINTS)
+
+
+def _company_hint_score(value: str) -> int:
+    """Return organization-hint score for one candidate text."""
+
+    lowered = value.lower()
+    return sum(1 for token in _COMPANY_HINTS if token in lowered)
 
 
 def _truncate_company_segment(company_raw: str) -> str:
@@ -687,9 +992,9 @@ def _is_plausible_experience_title(value: str) -> bool:
     """Return whether title candidate looks like a role title."""
 
     lowered = value.lower()
-    if len(value) < 2 or len(value) > 80:
+    if len(value) < 2 or len(value) > 120:
         return False
-    if len(value.split()) > 8:
+    if len(value.split()) > 14:
         return False
     if _EMAIL_PATTERN.search(value):
         return False
@@ -704,13 +1009,13 @@ def _is_plausible_company_name(value: str) -> bool:
     """Return whether company candidate looks like organization name."""
 
     lowered = value.lower()
-    if len(value) < 2 or len(value) > 80:
+    if len(value) < 2 or len(value) > 120:
         return False
-    if len(value.split()) > 7:
+    if len(value.split()) > 14:
         return False
     if "@" in value or "http" in lowered:
         return False
-    if any(token in lowered for token in ("delivering", "responsible", "project", "analytics")):
+    if any(token in lowered for token in ("delivering", "responsible", "project objective")):
         return False
     return True
 
@@ -718,25 +1023,42 @@ def _is_plausible_company_name(value: str) -> bool:
 def _parse_education_line(line: str, source_locator: str | None) -> ImportedEducationDraft | None:
     """Parse one education line into structured fields."""
 
-    lowered = line.lower()
+    normalized = normalize_text(line)
+    if not normalized:
+        return None
+
+    lowered = normalized.lower()
     if not any(marker in lowered for marker in _DEGREE_MARKERS):
         return None
 
-    segments = [part.strip() for part in re.split(r"\s+-\s+|\s+at\s+|\s+bei\s+", line) if part.strip()]
+    segments = [
+        part.strip()
+        for part in re.split(r"\s+-\s+|\s+at\s+|\s+bei\s+|\s+\|\s+", normalized)
+        if part.strip()
+    ]
     if len(segments) < 2:
         return None
 
-    degree = normalize_text(segments[0])
-    institution = normalize_text(re.split(r"[,;|]", segments[1], maxsplit=1)[0])
+    left = normalize_text(segments[0])
+    right = normalize_text(re.split(r"[,;|]", segments[1], maxsplit=1)[0])
 
-    if len(degree) > 90 or len(institution) > 90:
+    if _looks_like_degree_text(left):
+        degree = left
+        institution = right
+    elif _looks_like_degree_text(right):
+        degree = right
+        institution = left
+    else:
+        return None
+
+    if len(degree) > 120 or len(institution) > 120:
         return None
     if _looks_like_narrative_line(degree) or _looks_like_narrative_line(institution):
         return None
 
-    start_date, end_date = _extract_date_range(line)
+    start_date, end_date = _extract_date_range(normalized)
     if start_date is None:
-        year_match = _YEAR_PATTERN.search(line)
+        year_match = _YEAR_PATTERN.search(normalized)
         start_date = f"{year_match.group(0)}-01-01" if year_match else None
 
     return ImportedEducationDraft(
@@ -745,7 +1067,15 @@ def _parse_education_line(line: str, source_locator: str | None) -> ImportedEduc
         start_date=start_date,
         end_date=end_date,
         source_locator=source_locator,
+        source_excerpt=normalized,
     )
+
+
+def _looks_like_degree_text(value: str) -> bool:
+    """Return whether one text candidate likely represents degree text."""
+
+    lowered = value.lower()
+    return any(marker in lowered for marker in _DEGREE_MARKERS)
 
 
 def _parse_skill_line(line: str, source_locator: str | None) -> list[ImportedSkillDraft]:
@@ -755,28 +1085,48 @@ def _parse_skill_line(line: str, source_locator: str | None) -> list[ImportedSki
     if not cleaned_line:
         return []
 
-    if _SKILLS_SPLIT_PATTERN.search(cleaned_line) is None:
+    normalized_for_prefix = re.sub(r"^(skills|technologies|tools|kompetenzen|kenntnisse)\s*[:|-]\s*", "", cleaned_line, flags=re.IGNORECASE)
+    if not normalized_for_prefix:
         return []
 
+    tokens: list[str]
+    if _SKILLS_SPLIT_PATTERN.search(normalized_for_prefix) is None:
+        tokens = [normalized_for_prefix]
+    else:
+        tokens = [part for part in _SKILLS_SPLIT_PATTERN.split(normalized_for_prefix) if part.strip()]
+
     skills: list[ImportedSkillDraft] = []
-    for token in _SKILLS_SPLIT_PATTERN.split(cleaned_line):
+    for token in tokens:
         cleaned = _normalize_skill_token(normalize_text(token))
-        if not _is_valid_skill_token(cleaned):
+        if _is_valid_skill_token(cleaned):
+            skills.append(ImportedSkillDraft(skill_name=cleaned, source_locator=source_locator, source_excerpt=cleaned_line))
             continue
-        skills.append(ImportedSkillDraft(skill_name=cleaned, source_locator=source_locator))
-    return skills
+
+        # Fallback: recover known skill keywords from dense tokens.
+        lowered = cleaned.lower()
+        for keyword, label in _SKILL_KEYWORDS.items():
+            if keyword in lowered:
+                skills.append(ImportedSkillDraft(skill_name=label, source_locator=source_locator, source_excerpt=cleaned_line))
+
+    return _deduplicate_skills(skills)
 
 
 def _normalize_skill_token(token: str) -> str:
     """Normalize extracted skill token into canonical value."""
 
     lowered = token.lower()
-    if lowered in {"llms", "large language models"}:
+    if lowered in {"llms", "large language models", "large language model"}:
         return "LLM"
-    if lowered in {"vlms", "vision language models"}:
+    if lowered in {"vlms", "vision language models", "vision language model"}:
         return "VLM"
     if lowered == "mlops":
         return "MLOps"
+    if lowered in {"ci/cd", "ci-cd"}:
+        return "CI/CD"
+    if lowered in {"nlp/understanding", "nlp understanding"}:
+        return "NLP"
+    if lowered == "computer-vision":
+        return "Computer Vision"
     return token
 
 
@@ -823,7 +1173,19 @@ def _looks_like_potential_experience_line(line: str) -> bool:
     """Return whether line can plausibly encode experience tuple."""
 
     lowered = line.lower()
-    return any(separator.strip() in lowered for separator in _EXPERIENCE_SEPARATORS)
+    has_separator = any(separator in lowered for separator in _EXPERIENCE_SEPARATORS) or any(
+        separator in line for separator in _EXPERIENCE_DASH_SEPARATORS
+    )
+    if not has_separator:
+        return False
+
+    parsed = _parse_experience_line(line, source_locator=None)
+    if parsed is None:
+        return False
+
+    if _company_hint_score(parsed.company) > 0:
+        return True
+    return _contains_role_keyword(parsed.title)
 
 
 def _should_track_unmapped_line(line: str) -> bool:

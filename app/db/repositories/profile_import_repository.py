@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models.profile_import import (
@@ -309,6 +309,45 @@ class ProfileImportRepository:
                 )
             )
 
+        self._session.flush()
+
+
+    def count_runs_for_source(self, source_id: str) -> int:
+        """Count import runs for one source identifier.
+
+        Args:
+            source_id: Import source identifier.
+
+        Returns:
+            Number of import runs for the source.
+        """
+
+        stmt = select(func.count(ProfileImportRunModel.id)).where(ProfileImportRunModel.source_id == source_id)
+        count = self._session.scalar(stmt)
+        return int(count or 0)
+
+    def delete_run(self, run: ProfileImportRunModel) -> None:
+        """Delete one import run row and cascading children.
+
+        Args:
+            run: Import run model instance.
+        """
+
+        self._session.delete(run)
+        self._session.flush()
+
+    def delete_source_by_id(self, source_id: str) -> None:
+        """Delete one import source row by identifier when present.
+
+        Args:
+            source_id: Import source identifier.
+        """
+
+        source = self._session.get(ProfileImportSourceModel, source_id)
+        if source is None:
+            return
+
+        self._session.delete(source)
         self._session.flush()
 
 

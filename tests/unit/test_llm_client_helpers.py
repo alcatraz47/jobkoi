@@ -14,12 +14,13 @@ from app.llm.contracts import (
     CoverLetterResponse,
     CvRewriteResponse,
     FactRewriteResponse,
+    ProfileImportExtractionResponse,
     RequirementExtractionResponse,
     ValidationResponse,
 )
 from app.llm.cover_letter_helper import CoverLetterHelper
 from app.llm.errors import LlmResponseFormatError, LlmTransportError
-from app.llm.extraction_helper import ExtractionHelper
+from app.llm.extraction_helper import ExtractionHelper, ProfileImportExtractionHelper
 from app.llm.rewrite_helper import CvRewriteHelper, TailoringRewriteHelper
 from app.llm.validation_helper import ValidationHelper
 
@@ -256,3 +257,43 @@ def test_cover_letter_and_validation_helpers_return_typed_models() -> None:
 
     assert validation.is_valid is False
     assert validation.issues[0].issue_type == "unsupported_claim"
+
+
+def test_profile_import_extraction_helper_returns_typed_model() -> None:
+    """Profile import extraction helper should return typed extraction model."""
+
+    fake_client = FakeStructuredClient(
+        ProfileImportExtractionResponse(
+            full_name={"value": "Arfan Example", "source_excerpt": "Arfan Example", "source_locator": "resume.pdf"},
+            email={"value": "arfan@example.com", "source_excerpt": "arfan@example.com", "source_locator": "resume.pdf"},
+            experiences=[
+                {
+                    "company": "Example GmbH",
+                    "title": "Software Engineer",
+                    "description": "Built backend APIs.",
+                    "source_excerpt": "Software Engineer at Example GmbH",
+                    "source_locator": "resume.pdf",
+                }
+            ],
+            skills=[
+                {
+                    "skill_name": "Python",
+                    "source_excerpt": "Python",
+                    "source_locator": "resume.pdf",
+                }
+            ],
+        )
+    )
+    helper = ProfileImportExtractionHelper(cast(OllamaClient, fake_client))
+
+    response = helper.extract_profile(
+        source_type="cv_document",
+        source_label="resume.pdf",
+        raw_text="Arfan Example\nSoftware Engineer at Example GmbH\nPython",
+        detected_language="en",
+    )
+
+    assert response.full_name is not None
+    assert response.full_name.value == "Arfan Example"
+    assert response.experiences[0].company == "Example GmbH"
+    assert response.skills[0].skill_name == "Python"

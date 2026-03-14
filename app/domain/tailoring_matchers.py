@@ -10,6 +10,14 @@ from app.domain.tailoring_types import JobRequirementData
 
 _WORD_PATTERN: Final[re.Pattern[str]] = re.compile(r"[a-zA-Z0-9+#.]{2,}")
 
+_CANONICAL_PHRASE_MARKERS: Final[dict[str, tuple[str, ...]]] = {
+    "nlp": ("natural language processing",),
+    "llm": ("large language model", "large language models"),
+    "vlm": ("vision language model", "vision language models"),
+    "computer_vision": ("computer vision",),
+    "ocr": ("optical character recognition",),
+}
+
 
 def tokenize_for_match(text: str) -> set[str]:
     """Tokenize text into normalized matching tokens.
@@ -18,11 +26,50 @@ def tokenize_for_match(text: str) -> set[str]:
         text: Input text.
 
     Returns:
-        Lower-case token set.
+        Lower-case token set enriched with canonical aliases.
     """
 
     normalized = normalize_text(text).lower()
-    return {token for token in _WORD_PATTERN.findall(normalized) if len(token) >= 2}
+    base_tokens = {token for token in _WORD_PATTERN.findall(normalized) if len(token) >= 2}
+    return _expand_canonical_tokens(base_tokens=base_tokens, normalized_text=normalized)
+
+
+def _expand_canonical_tokens(*, base_tokens: set[str], normalized_text: str) -> set[str]:
+    """Expand base tokens with canonical alias tokens.
+
+    Args:
+        base_tokens: Raw token set from input text.
+        normalized_text: Normalized source text.
+
+    Returns:
+        Expanded token set used for matching.
+    """
+
+    expanded = set(base_tokens)
+
+    for canonical, markers in _CANONICAL_PHRASE_MARKERS.items():
+        if any(marker in normalized_text for marker in markers):
+            expanded.add(canonical)
+
+    if "nlp" in expanded:
+        expanded.add("nlp")
+
+    if "llm" in expanded or "llms" in expanded:
+        expanded.add("llm")
+
+    if "vlm" in expanded or "vlms" in expanded:
+        expanded.add("vlm")
+
+    if "ci/cd" in normalized_text or {"ci", "cd"}.issubset(expanded):
+        expanded.add("ci_cd")
+
+    if "continuous integration" in normalized_text and "continuous deployment" in normalized_text:
+        expanded.add("ci_cd")
+
+    if "mlops" in expanded or ("ml" in expanded and "ops" in expanded):
+        expanded.add("mlops")
+
+    return expanded
 
 
 def build_requirement_keyword_set(requirements: list[JobRequirementData]) -> set[str]:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -34,7 +35,13 @@ from app.domain.profile_import_confidence import (
     risk_level_for_field,
 )
 from app.domain.profile_import_conflicts import detect_import_conflicts
-from app.domain.profile_import_types import ImportedProfileDraft
+from app.domain.job_text import normalize_text
+from app.domain.profile_import_types import (
+    ImportedEducationDraft,
+    ImportedExperienceDraft,
+    ImportedProfileDraft,
+    ImportedSkillDraft,
+)
 from app.schemas.profile import (
     EducationInput,
     ExperienceInput,
@@ -50,6 +57,7 @@ from app.schemas.profile_import import (
     ProfileImportAppliedFactResponse,
     ProfileImportConflictResponse,
     ProfileImportDecisionResponse,
+    ProfileImportDeleteResponse,
     ProfileImportFieldResponse,
     ProfileImportRejectRequest,
     ProfileImportReviewRequest,
@@ -64,6 +72,9 @@ from app.services.profile_import_extractors import (
     WebsiteImportExtractor,
     compute_sha256_bytes,
 )
+from app.llm import ProfileImportExtractionHelper, get_ollama_client
+from app.llm.contracts import ProfileImportExtractionResponse, ProfileImportScalarField
+from app.llm.errors import LlmError
 from app.services.profile_service import ProfileNotFoundError, ProfileService
 
 
@@ -118,6 +129,15 @@ class ProfileImportService:
         self._auto_approve_enabled = bool(
             getattr(settings, "profile_import_auto_approve_enabled", True)
         )
+        self._profile_import_llm_enabled = bool(
+            getattr(settings, "profile_import_llm_enabled", False)
+        )
+        self._profile_import_llm_max_input_chars = int(
+            getattr(settings, "profile_import_llm_max_input_chars", 24000)
+        )
+        self._profile_import_extraction_helper: ProfileImportExtractionHelper | None = None
+        if self._profile_import_llm_enabled:
+            self._profile_import_extraction_helper = self._build_default_profile_import_extraction_helper()
 
     def import_cv(
         self,
@@ -167,6 +187,8 @@ class ProfileImportService:
             extractor_name=extracted.extractor_name,
             extractor_version=extracted.extractor_version,
             source_locator=file_name,
+            source_type="cv_document",
+            source_label=file_name,
         )
         run = self._repository.create_run(source.id, run_payload)
         self._session.commit()
@@ -297,6 +319,31 @@ class ProfileImportService:
         self._session.commit()
         return self.get_run(run_id)
 
+    def delete_run(self, run_id: str) -> ProfileImportDeleteResponse:
+        """Delete one profile import run and attached source artifacts.
+
+        Args:
+            run_id: Import run identifier.
+
+        Returns:
+            Delete response payload.
+
+        Raises:
+            ProfileImportRunNotFoundError: If run does not exist.
+        """
+
+        run = self._require_run(run_id)
+        source_id = run.source.id
+        source_file_path = run.source.file_path
+
+        self._repository.delete_run(run)
+        if self._repository.count_runs_for_source(source_id) == 0:
+            self._repository.delete_source_by_id(source_id)
+
+        self._session.commit()
+        _delete_source_file(source_file_path)
+        return ProfileImportDeleteResponse(deleted=True, run_id=run_id)
+
     def apply_run(self, run_id: str) -> ProfileImportApplyResponse:
         """Apply approved/edited import fields into master profile via new version.
 
@@ -330,17 +377,31 @@ class ProfileImportService:
         payload = _build_profile_apply_payload(existing_profile)
         applied_field_paths: list[tuple[str, str]] = []
 
-        _apply_scalar_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
-        _apply_experience_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
-        _apply_education_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
-        _apply_skill_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
+        try:
+            _apply_scalar_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
+            _apply_experience_fields(
+                payload=payload,
+                fields=selected_fields,
+                applied_field_paths=applied_field_paths,
+            )
+            _apply_education_fields(
+                payload=payload,
+                fields=selected_fields,
+                applied_field_paths=applied_field_paths,
+            )
+            _apply_skill_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
+        except ValidationError as exc:
+            raise ProfileImportValidationError(_format_validation_error(exc)) from exc
 
         if not payload["full_name"] or not payload["email"]:
             raise ProfileImportValidationError(
                 "Applying import requires full_name and email after review decisions."
             )
 
-        profile_response = self._save_profile_payload(existing_profile, payload)
+        try:
+            profile_response = self._save_profile_payload(existing_profile, payload)
+        except ValidationError as exc:
+            raise ProfileImportValidationError(_format_validation_error(exc)) from exc
 
         trace_rows = [
             AppliedFactPayload(
@@ -372,16 +433,84 @@ class ProfileImportService:
         extractor_name: str,
         extractor_version: str | None,
         source_locator: str,
+        source_type: str,
+        source_label: str,
     ) -> ImportRunPayload:
         """Build repository run payload from raw text."""
 
         draft = build_imported_profile_from_text(text=raw_text, source_locator=source_locator)
+        combined_extractor_name = extractor_name
+
+        llm_draft = self._extract_llm_draft_for_source(
+            raw_text=raw_text,
+            source_type=source_type,
+            source_label=source_label,
+            source_locator=source_locator,
+        )
+        if llm_draft is not None:
+            draft = _merge_imported_profile_drafts(base=draft, incoming=llm_draft)
+            combined_extractor_name = f"{extractor_name}+llm"
+
         return self._build_run_payload_from_draft(
             draft=draft,
             raw_text=raw_text,
-            extractor_name=extractor_name,
+            extractor_name=combined_extractor_name,
             extractor_version=extractor_version,
         )
+
+    def _build_default_profile_import_extraction_helper(self) -> ProfileImportExtractionHelper | None:
+        """Build default LLM profile import helper when configured."""
+
+        try:
+            return ProfileImportExtractionHelper(get_ollama_client())
+        except Exception:
+            return None
+
+    def _extract_llm_draft_for_source(
+        self,
+        *,
+        raw_text: str,
+        source_type: str,
+        source_label: str,
+        source_locator: str,
+    ) -> ImportedProfileDraft | None:
+        """Extract and validate one optional LLM draft from source text."""
+
+        if source_type != "cv_document":
+            return None
+        if not self._profile_import_llm_enabled:
+            return None
+        if self._profile_import_extraction_helper is None:
+            return None
+
+        truncated_text = _truncate_for_llm_input(
+            raw_text=raw_text,
+            max_chars=self._profile_import_llm_max_input_chars,
+        )
+        if len(truncated_text) < 40:
+            return None
+
+        try:
+            response = self._profile_import_extraction_helper.extract_profile(
+                source_type=source_type,
+                source_label=source_label,
+                raw_text=truncated_text,
+                detected_language=detect_import_language(raw_text),
+            )
+        except LlmError:
+            return None
+
+        llm_draft = _build_profile_draft_from_llm_response(
+            response=response,
+            source_locator=source_locator,
+        )
+        validated = _filter_profile_draft_by_source_support(
+            draft=llm_draft,
+            raw_text=raw_text,
+        )
+        if _is_empty_import_draft(validated):
+            return None
+        return validated
 
     def _build_run_payload_from_draft(
         self,
@@ -1014,3 +1143,385 @@ def _optional_date_string(value: str | None) -> str | None:
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", candidate):
         return None
     return candidate
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Format pydantic validation errors into an apply-friendly message.
+
+    Args:
+        exc: Raised pydantic validation error.
+
+    Returns:
+        Human-readable validation message for API responses.
+    """
+
+    details: list[str] = []
+    for row in exc.errors():
+        location = ".".join(str(part) for part in row.get("loc", ()))
+        message = str(row.get("msg", "invalid value"))
+        if location:
+            details.append(f"{location}: {message}")
+        else:
+            details.append(message)
+
+    summary = "; ".join(details[:3]) if details else "Invalid imported field values."
+    return f"Import apply validation failed. Review extracted fields: {summary}"
+
+
+def _delete_source_file(file_path: str | None) -> None:
+    """Delete one persisted import source file path when present.
+
+    Args:
+        file_path: Persisted source file path.
+
+    Returns:
+        None.
+    """
+
+    if not file_path:
+        return
+
+    try:
+        Path(file_path).unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+_TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9+./#-]*")
+
+
+def _truncate_for_llm_input(*, raw_text: str, max_chars: int) -> str:
+    """Return length-limited source text for LLM extraction.
+
+    Args:
+        raw_text: Full extracted source text.
+        max_chars: Maximum character count.
+
+    Returns:
+        Trimmed source text.
+    """
+
+    cleaned = raw_text.strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[:max_chars]
+
+
+def _build_profile_draft_from_llm_response(
+    *,
+    response: ProfileImportExtractionResponse,
+    source_locator: str,
+) -> ImportedProfileDraft:
+    """Build imported profile draft from structured LLM response.
+
+    Args:
+        response: Structured LLM extraction response.
+        source_locator: Default source locator.
+
+    Returns:
+        Imported profile draft.
+    """
+
+    full_name = _extract_scalar_value(response.full_name, max_length=120)
+    email = _extract_scalar_value(response.email, max_length=255)
+    phone = _extract_scalar_value(response.phone, max_length=64)
+    location = _extract_scalar_value(response.location, max_length=120)
+    headline = _extract_scalar_value(response.headline, max_length=220)
+    summary = _extract_scalar_value(response.summary, max_length=1200)
+
+    experiences: list[ImportedExperienceDraft] = []
+    for item in response.experiences:
+        company = _normalize_value(item.company, max_length=160)
+        title = _normalize_value(item.title, max_length=160)
+        if not company or not title:
+            continue
+
+        experiences.append(
+            ImportedExperienceDraft(
+                company=company,
+                title=title,
+                start_date=_normalize_value(item.start_date, max_length=32),
+                end_date=_normalize_value(item.end_date, max_length=32),
+                description=_normalize_value(item.description, max_length=1200),
+                source_locator=_normalize_value(item.source_locator, max_length=255) or source_locator,
+                source_excerpt=_normalize_value(item.source_excerpt, max_length=1200),
+            )
+        )
+
+    educations: list[ImportedEducationDraft] = []
+    for item in response.educations:
+        institution = _normalize_value(item.institution, max_length=160)
+        degree = _normalize_value(item.degree, max_length=160)
+        if not institution or not degree:
+            continue
+
+        educations.append(
+            ImportedEducationDraft(
+                institution=institution,
+                degree=degree,
+                field_of_study=_normalize_value(item.field_of_study, max_length=160),
+                start_date=_normalize_value(item.start_date, max_length=32),
+                end_date=_normalize_value(item.end_date, max_length=32),
+                source_locator=_normalize_value(item.source_locator, max_length=255) or source_locator,
+                source_excerpt=_normalize_value(item.source_excerpt, max_length=1200),
+            )
+        )
+
+    skills: list[ImportedSkillDraft] = []
+    for item in response.skills:
+        skill_name = _normalize_value(item.skill_name, max_length=80)
+        if not skill_name:
+            continue
+
+        skills.append(
+            ImportedSkillDraft(
+                skill_name=skill_name,
+                level=_normalize_value(item.level, max_length=40),
+                category=_normalize_value(item.category, max_length=80),
+                source_locator=_normalize_value(item.source_locator, max_length=255) or source_locator,
+                source_excerpt=_normalize_value(item.source_excerpt, max_length=1200),
+            )
+        )
+
+    return ImportedProfileDraft(
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        location=location,
+        headline=headline,
+        summary=summary,
+        experiences=experiences,
+        educations=educations,
+        skills=skills,
+    )
+
+
+def _filter_profile_draft_by_source_support(
+    *,
+    draft: ImportedProfileDraft,
+    raw_text: str,
+) -> ImportedProfileDraft:
+    """Filter LLM draft values that are not text-supported by the source.
+
+    Args:
+        draft: LLM-derived profile draft.
+        raw_text: Original extracted source text.
+
+    Returns:
+        Filtered profile draft containing only source-supported values.
+    """
+
+    normalized_source = normalize_text(raw_text).lower()
+    source_tokens = set(_TOKEN_PATTERN.findall(normalized_source))
+
+    full_name = _supported_scalar_value(draft.full_name, normalized_source, source_tokens)
+    email = _supported_scalar_value(draft.email, normalized_source, source_tokens)
+    phone = _supported_scalar_value(draft.phone, normalized_source, source_tokens)
+    location = _supported_scalar_value(draft.location, normalized_source, source_tokens)
+    headline = _supported_scalar_value(draft.headline, normalized_source, source_tokens)
+    summary = _supported_scalar_value(draft.summary, normalized_source, source_tokens)
+
+    experiences: list[ImportedExperienceDraft] = []
+    for item in draft.experiences:
+        company = _supported_scalar_value(item.company, normalized_source, source_tokens)
+        title = _supported_scalar_value(item.title, normalized_source, source_tokens)
+        if not company or not title:
+            continue
+        if len(company.split()) > 10 or len(title.split()) > 10:
+            continue
+
+        experiences.append(
+            ImportedExperienceDraft(
+                company=company,
+                title=title,
+                start_date=_supported_scalar_value(item.start_date, normalized_source, source_tokens),
+                end_date=_supported_scalar_value(item.end_date, normalized_source, source_tokens),
+                description=_supported_scalar_value(item.description, normalized_source, source_tokens),
+                source_locator=item.source_locator,
+                source_excerpt=_supported_scalar_value(item.source_excerpt, normalized_source, source_tokens),
+            )
+        )
+
+    educations: list[ImportedEducationDraft] = []
+    for item in draft.educations:
+        institution = _supported_scalar_value(item.institution, normalized_source, source_tokens)
+        degree = _supported_scalar_value(item.degree, normalized_source, source_tokens)
+        if not institution or not degree:
+            continue
+
+        educations.append(
+            ImportedEducationDraft(
+                institution=institution,
+                degree=degree,
+                field_of_study=_supported_scalar_value(item.field_of_study, normalized_source, source_tokens),
+                start_date=_supported_scalar_value(item.start_date, normalized_source, source_tokens),
+                end_date=_supported_scalar_value(item.end_date, normalized_source, source_tokens),
+                source_locator=item.source_locator,
+                source_excerpt=_supported_scalar_value(item.source_excerpt, normalized_source, source_tokens),
+            )
+        )
+
+    skills: list[ImportedSkillDraft] = []
+    for item in draft.skills:
+        skill_name = _supported_scalar_value(item.skill_name, normalized_source, source_tokens)
+        if not skill_name:
+            continue
+        if len(skill_name.split()) > 6:
+            continue
+
+        skills.append(
+            ImportedSkillDraft(
+                skill_name=skill_name,
+                level=_supported_scalar_value(item.level, normalized_source, source_tokens),
+                category=_supported_scalar_value(item.category, normalized_source, source_tokens),
+                source_locator=item.source_locator,
+                source_excerpt=_supported_scalar_value(item.source_excerpt, normalized_source, source_tokens),
+            )
+        )
+
+    return ImportedProfileDraft(
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        location=location,
+        headline=headline,
+        summary=summary,
+        experiences=experiences,
+        educations=educations,
+        skills=skills,
+        unmapped_candidates=list(draft.unmapped_candidates),
+    )
+
+
+def _supported_scalar_value(
+    value: str | None,
+    normalized_source: str,
+    source_tokens: set[str],
+) -> str | None:
+    """Return value only when it is supported by source text.
+
+    Args:
+        value: Candidate value.
+        normalized_source: Lower-cased normalized source text.
+        source_tokens: Token set built from source text.
+
+    Returns:
+        Supported value or ``None`` when unsupported.
+    """
+
+    normalized_value = _normalize_value(value, max_length=1200)
+    if not normalized_value:
+        return None
+
+    if _is_supported_value(
+        value=normalized_value,
+        normalized_source=normalized_source,
+        source_tokens=source_tokens,
+    ):
+        return normalized_value
+
+    return None
+
+
+def _is_supported_value(
+    *,
+    value: str,
+    normalized_source: str,
+    source_tokens: set[str],
+) -> bool:
+    """Return whether one value is directly supported by source text.
+
+    Args:
+        value: Candidate value.
+        normalized_source: Lower-cased normalized source text.
+        source_tokens: Token set built from source text.
+
+    Returns:
+        True when value appears directly or with strong token overlap.
+    """
+
+    normalized_value = normalize_text(value).lower()
+    if not normalized_value:
+        return False
+
+    if normalized_value in normalized_source:
+        return True
+
+    value_tokens = _TOKEN_PATTERN.findall(normalized_value)
+    if not value_tokens:
+        return False
+
+    if len(value_tokens) == 1:
+        return value_tokens[0] in source_tokens
+
+    overlap = sum(1 for token in value_tokens if token in source_tokens)
+    ratio = overlap / len(value_tokens)
+    return ratio >= 0.75
+
+
+def _extract_scalar_value(
+    field: ProfileImportScalarField | None,
+    *,
+    max_length: int,
+) -> str | None:
+    """Extract scalar value from profile import scalar field model.
+
+    Args:
+        field: Scalar field model.
+        max_length: Maximum allowed length.
+
+    Returns:
+        Normalized scalar value.
+    """
+
+    if field is None:
+        return None
+    return _normalize_value(field.value, max_length=max_length)
+
+
+def _normalize_value(value: str | None, *, max_length: int) -> str | None:
+    """Normalize and clamp one extracted value.
+
+    Args:
+        value: Raw value.
+        max_length: Maximum allowed length.
+
+    Returns:
+        Cleaned value or ``None`` when empty.
+    """
+
+    if value is None:
+        return None
+    normalized = normalize_text(value)
+    if not normalized:
+        return None
+    return normalized[:max_length]
+
+
+def _is_empty_import_draft(draft: ImportedProfileDraft) -> bool:
+    """Return whether an imported draft has no usable fields.
+
+    Args:
+        draft: Imported draft.
+
+    Returns:
+        True when no scalar or section rows are present.
+    """
+
+    scalar_values = (
+        draft.full_name,
+        draft.email,
+        draft.phone,
+        draft.location,
+        draft.headline,
+        draft.summary,
+    )
+    if any(item for item in scalar_values):
+        return False
+    if draft.experiences:
+        return False
+    if draft.educations:
+        return False
+    if draft.skills:
+        return False
+    return True

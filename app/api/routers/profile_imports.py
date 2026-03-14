@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db_session
 from app.schemas.profile_import import (
     ProfileImportApplyResponse,
+    ProfileImportDeleteResponse,
     ProfileImportRejectRequest,
     ProfileImportReviewRequest,
     ProfileImportRunListResponse,
@@ -177,6 +178,31 @@ def apply_profile_import_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProfileImportValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@router.delete("/{run_id}", response_model=ProfileImportDeleteResponse)
+def delete_profile_import_run(
+    run_id: str,
+    session: Session = Depends(get_db_session),
+) -> ProfileImportDeleteResponse:
+    """Delete one profile import run.
+
+    Args:
+        run_id: Import run identifier.
+        session: Database session dependency.
+
+    Returns:
+        Deletion acknowledgement payload.
+
+    Raises:
+        HTTPException: If run is missing.
+    """
+
+    service = ProfileImportService(session)
+    try:
+        return service.delete_run(run_id)
+    except ProfileImportRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/{run_id}/reject", response_model=ProfileImportRunResponse)

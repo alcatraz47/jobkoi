@@ -119,23 +119,23 @@ class CvImportExtractor:
         suffix = file_path.suffix.lower()
         if suffix == ".docx":
             text = _extract_docx_text(file_path)
-            return ExtractedTextResult(text=normalize_text(text), extractor_name="docx_fallback")
+            return ExtractedTextResult(text=_normalize_multiline_text(text), extractor_name="docx_fallback")
 
         if suffix == ".pdf":
             text = _extract_pdf_text(file_path)
-            return ExtractedTextResult(text=normalize_text(text), extractor_name="pdf_fallback")
+            return ExtractedTextResult(text=_normalize_multiline_text(text), extractor_name="pdf_fallback")
 
         if suffix in {".txt", ".md", ".rtf"}:
             text = file_path.read_text(encoding="utf-8", errors="ignore")
-            return ExtractedTextResult(text=normalize_text(text), extractor_name="text_fallback")
+            return ExtractedTextResult(text=_normalize_multiline_text(text), extractor_name="text_fallback")
 
         if content_type and "word" in content_type:
             text = _extract_docx_text(file_path)
-            return ExtractedTextResult(text=normalize_text(text), extractor_name="docx_fallback")
+            return ExtractedTextResult(text=_normalize_multiline_text(text), extractor_name="docx_fallback")
 
         if content_type and "pdf" in content_type:
             text = _extract_pdf_text(file_path)
-            return ExtractedTextResult(text=normalize_text(text), extractor_name="pdf_fallback")
+            return ExtractedTextResult(text=_normalize_multiline_text(text), extractor_name="pdf_fallback")
 
         raise ProfileImportExtractionError(
             f"Unsupported CV format for file '{file_name}'. Only PDF and DOCX are supported."
@@ -241,7 +241,7 @@ def _extract_with_docling(file_path: Path) -> ExtractedTextResult | None:
         result = converter.convert(str(file_path))
 
         text = _docling_result_to_text(result)
-        normalized = normalize_text(text)
+        normalized = _normalize_multiline_text(text)
         if not normalized:
             return None
         return ExtractedTextResult(
@@ -290,8 +290,17 @@ def _extract_docx_text(file_path: Path) -> str:
     except Exception as exc:
         raise ProfileImportExtractionError("Failed to parse DOCX file.") from exc
 
-    text = _strip_xml_tags(xml_bytes.decode("utf-8", errors="ignore"))
-    return text
+    xml_text = xml_bytes.decode("utf-8", errors="ignore")
+
+    # Preserve paragraph/table boundaries before XML tag stripping.
+    xml_text = re.sub(r"</w:p>", "\n", xml_text)
+    xml_text = re.sub(r"</w:tr>", "\n", xml_text)
+    xml_text = re.sub(r"<w:br\s*/>", "\n", xml_text)
+    xml_text = re.sub(r"<w:tab\s*/>", " ", xml_text)
+    xml_text = re.sub(r"<w:cr\s*/>", "\n", xml_text)
+
+    text = _strip_xml_tags(xml_text)
+    return _normalize_multiline_text(text)
 
 
 def _extract_pdf_text(file_path: Path) -> str:
@@ -306,13 +315,13 @@ def _extract_pdf_text(file_path: Path) -> str:
 
     if chunks:
         text_parts = [chunk.decode("latin-1", errors="ignore") for chunk in chunks]
-        return " ".join(text_parts)
+        return _normalize_multiline_text("\n".join(text_parts))
 
     printable = re.findall(rb"[A-Za-z0-9@._+\-/]{3,}", data)
     text = " ".join(part.decode("latin-1", errors="ignore") for part in printable)
     if not text.strip():
         raise ProfileImportExtractionError("Failed to parse PDF file.")
-    return text
+    return _normalize_multiline_text(text)
 
 
 def _extract_pdf_text_with_pypdf(file_path: Path) -> str:
@@ -337,16 +346,19 @@ def _extract_pdf_text_with_pypdf(file_path: Path) -> str:
 
     parts: list[str] = []
     for page in reader.pages:
+        raw_text = ""
         try:
-            text = page.extract_text() or ""
+            raw_text = page.extract_text(extraction_mode="layout") or ""
+        except TypeError:
+            raw_text = page.extract_text() or ""
         except Exception:
             continue
 
-        cleaned = normalize_text(text)
+        cleaned = _normalize_multiline_text(raw_text)
         if cleaned:
             parts.append(cleaned)
 
-    return "\n".join(parts)
+    return "\n\n".join(parts)
 
 
 def _strip_xml_tags(xml_text: str) -> str:
@@ -356,7 +368,7 @@ def _strip_xml_tags(xml_text: str) -> str:
     text = text.replace("&amp;", "&")
     text = text.replace("&lt;", "<")
     text = text.replace("&gt;", ">")
-    return normalize_text(text)
+    return text
 
 
 def _fetch_html_default(url: str) -> str:
