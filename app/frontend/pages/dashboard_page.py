@@ -48,6 +48,7 @@ def register_dashboard_page(
 
         render_navigation()
         with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
+            _render_repository_scope_warning()
             ui.label("Dashboard").classes("text-2xl font-semibold")
             ui.label(
                 "Truth-constrained tailoring workflow: profile, intake, analysis, review, and export."
@@ -60,6 +61,19 @@ def register_dashboard_page(
             _render_profile_completeness(profile_state)
             _render_recent_packages(package_state)
             _render_recent_documents(package_state.packages)
+
+
+def _render_repository_scope_warning() -> None:
+    """Render top-level project scope and caution warning."""
+
+    with ui.card().classes("w-full border-l-4 border-amber-500 bg-amber-50"):
+        ui.label("Warning").classes("text-md font-semibold text-amber-900")
+        ui.label(
+            "This repository is developed using vibe coding and is intended for personal use."
+        ).classes("text-sm text-amber-900")
+        ui.label(
+            "It is not developed with a multi-user focus. Review and harden it before broader use."
+        ).classes("text-sm text-amber-900")
 
 
 async def _load_dashboard_state(
@@ -96,11 +110,7 @@ async def _load_packages(*, package_state: PackageState, package_api: Applicatio
         ui.notify(str(exc), color="negative")
         return
 
-    package_state.packages = [
-        item
-        for item in payload.get("packages", [])
-        if isinstance(item, dict)
-    ]
+    package_state.packages = [item for item in payload.get("packages", []) if isinstance(item, dict)]
 
 
 def _render_profile_completeness(profile_state: ProfileState) -> None:
