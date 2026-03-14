@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ full_name }} - Cover Letter</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.5; color: #111; margin: 24px; }
+    p { margin: 8px 0; }
+    .meta { margin-bottom: 16px; color: #333; }
+  </style>
+</head>
+<body>
+  <p class="meta">{{ full_name }}<br>{{ email }}{% if phone %} | {{ phone }}{% endif %}{% if location %}<br>{{ location }}{% endif %}</p>
+
+  <p>Dear Hiring Team{% if company %} at {{ company }}{% endif %},</p>
+
+  <p>
+    I am applying for the {{ job_title }} position.
+    {% if summary %}{{ summary }}{% endif %}
+  </p>
+
+  {% if experiences %}
+  <p>
+    My most relevant experience includes {{ experiences[0].title }} at {{ experiences[0].company }}.
+    {% if experiences[0].description %}{{ experiences[0].description }}{% endif %}
+  </p>
+  {% endif %}
+
+  {% if skills %}
+  <p>
+    Core skills I would bring to this role include
+    {% for skill in skills %}
+      {{ skill.skill_name }}{% if not loop.last %}, {% else %}.{% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+
+  <p>Thank you for your consideration.</p>
+  <p>Sincerely,<br>{{ full_name }}</p>
+</body>
+</html>

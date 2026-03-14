@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ full_name }} - Anschreiben</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.5; color: #111; margin: 24px; }
+    p { margin: 8px 0; }
+    .meta { margin-bottom: 16px; color: #333; }
+  </style>
+</head>
+<body>
+  <p class="meta">{{ full_name }}<br>{{ email }}{% if phone %} | {{ phone }}{% endif %}{% if location %}<br>{{ location }}{% endif %}</p>
+
+  <p>Sehr geehrtes Hiring-Team{% if company %} bei {{ company }}{% endif %},</p>
+
+  <p>
+    hiermit bewerbe ich mich auf die Position {{ job_title }}.
+    {% if summary %}{{ summary }}{% endif %}
+  </p>
+
+  {% if experiences %}
+  <p>
+    Besonders relevante Erfahrung bringe ich als {{ experiences[0].title }} bei {{ experiences[0].company }} mit.
+    {% if experiences[0].description %}{{ experiences[0].description }}{% endif %}
+  </p>
+  {% endif %}
+
+  {% if skills %}
+  <p>
+    Zu meinen wichtigsten Kenntnissen gehören
+    {% for skill in skills %}
+      {{ skill.skill_name }}{% if not loop.last %}, {% else %}.{% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+
+  <p>Vielen Dank für Ihre Zeit und Prüfung meiner Unterlagen.</p>
+  <p>Mit freundlichen Grüßen<br>{{ full_name }}</p>
+</body>
+</html>

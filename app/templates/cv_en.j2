@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ full_name }} - CV</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.35; color: #111; margin: 24px; }
+    h1 { margin: 0 0 4px 0; font-size: 24px; }
+    h2 { margin: 16px 0 8px 0; font-size: 14px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
+    p { margin: 4px 0; }
+    ul { margin: 4px 0 4px 18px; padding: 0; }
+    li { margin: 2px 0; }
+    .meta { color: #333; }
+    .entry-title { font-weight: 700; }
+    .entry-meta { color: #444; }
+    .skill-line { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{ full_name }}</h1>
+    {% if headline %}<p class="meta">{{ headline }}</p>{% endif %}
+    <p class="meta">{{ email }}{% if phone %} | {{ phone }}{% endif %}{% if location %} | {{ location }}{% endif %}</p>
+  </header>
+
+  {% if summary %}
+  <section>
+    <h2>Professional Summary</h2>
+    <p>{{ summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if skills %}
+  <section>
+    <h2>Skills</h2>
+    <ul>
+      {% for skill in skills %}
+      <li>{{ skill.skill_name }}{% if skill.level %} ({{ skill.level }}){% endif %}{% if skill.category %} - {{ skill.category }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if experiences %}
+  <section>
+    <h2>Experience</h2>
+    {% for experience in experiences %}
+    <article>
+      <p class="entry-title">{{ experience.title }} - {{ experience.company }}</p>
+      <p class="entry-meta">{{ experience.start_date or '' }}{% if experience.end_date %} to {{ experience.end_date }}{% endif %}</p>
+      {% if experience.description %}
+      <p>{{ experience.description }}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if educations %}
+  <section>
+    <h2>Education</h2>
+    {% for education in educations %}
+    <article>
+      <p class="entry-title">{{ education.degree }} - {{ education.institution }}</p>
+      <p class="entry-meta">{{ education.field_of_study or '' }}</p>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+</body>
+</html>

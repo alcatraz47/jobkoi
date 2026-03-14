@@ -1,0 +1,1 @@
+"""Jobkoi application package."""
