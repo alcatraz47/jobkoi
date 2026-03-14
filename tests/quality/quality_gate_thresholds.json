@@ -1,0 +1,7 @@
+{
+  "min_case_count": 30,
+  "min_macro_f1_mean": 0.94,
+  "min_cv_macro_f1_mean": 0.93,
+  "min_portfolio_macro_f1_mean": 0.90,
+  "min_case_macro_f1": 0.70
+}

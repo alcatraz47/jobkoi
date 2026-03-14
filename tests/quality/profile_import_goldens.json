@@ -1,0 +1,1267 @@
+{
+  "cases": [
+    {
+      "id": "cv_en_01_backend",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_01_backend.txt",
+      "input_text": "Arfan Example\nSenior Backend Engineer\narfan@example.com\n+49 176 1234567\n\nExperience\nSoftware Engineer at Example GmbH\n\nEducation\nMSc Computer Science at TU Berlin\n\nSkills\nPython, FastAPI, SQL, Docker\n",
+      "expected": {
+        "full_name": "Arfan Example",
+        "email": "arfan@example.com",
+        "phone": "+49 176 1234567",
+        "location": null,
+        "headline": "Senior Backend Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Example GmbH",
+            "title": "Software Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "TU Berlin",
+            "degree": "MSc Computer Science"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "FastAPI"
+          },
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "Docker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_02_data",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_02_data.txt",
+      "input_text": "Mina Carter\nData Engineer\nmina.carter@example.com\n+1 415 5550101\n\nExperience\nData Engineer at Northwind Analytics\n\nEducation\nBSc Statistics at State University\n\nSkills\nPython, Airflow, SQL, dbt\n",
+      "expected": {
+        "full_name": "Mina Carter",
+        "email": "mina.carter@example.com",
+        "phone": "+1 415 5550101",
+        "location": null,
+        "headline": "Data Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Northwind Analytics",
+            "title": "Data Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "State University",
+            "degree": "BSc Statistics"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "Airflow"
+          },
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "dbt"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_03_ml",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_03_ml.txt",
+      "input_text": "Noah Kim\nMachine Learning Engineer\nnoah.kim@example.com\n+1 650 5550102\n\nExperience\nML Engineer at Vision Labs\n\nEducation\nMSc AI at Tech Institute\n\nSkills\nPython, PyTorch, MLOps, Docker\n",
+      "expected": {
+        "full_name": "Noah Kim",
+        "email": "noah.kim@example.com",
+        "phone": "+1 650 5550102",
+        "location": null,
+        "headline": "Machine Learning Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Vision Labs",
+            "title": "ML Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Tech Institute",
+            "degree": "MSc AI"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "PyTorch"
+          },
+          {
+            "skill_name": "MLOps"
+          },
+          {
+            "skill_name": "Docker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_04_nlp",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_04_nlp.txt",
+      "input_text": "Lena Brooks\nNLP Engineer\nlena.brooks@example.com\n+44 20 79460010\n\nExperience\nNLP Engineer at Language Works\n\nEducation\nMSc Computational Linguistics at City College\n\nSkills\nPython, NLP, LLM, SQL\n",
+      "expected": {
+        "full_name": "Lena Brooks",
+        "email": "lena.brooks@example.com",
+        "phone": "+44 20 79460010",
+        "location": null,
+        "headline": "NLP Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Language Works",
+            "title": "NLP Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "City College",
+            "degree": "MSc Computational Linguistics"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "NLP"
+          },
+          {
+            "skill_name": "LLM"
+          },
+          {
+            "skill_name": "SQL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_05_cv",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_05_cv.txt",
+      "input_text": "Ibrahim Ali\nComputer Vision Engineer\nibrahim.ali@example.com\n+49 30 12345678\n\nExperience\nVision Engineer at Rail AI Systems\n\nEducation\nMSc Robotics at Berlin Tech\n\nSkills\nPython, OpenCV, OCR, Docker\n",
+      "expected": {
+        "full_name": "Ibrahim Ali",
+        "email": "ibrahim.ali@example.com",
+        "phone": "+49 30 12345678",
+        "location": null,
+        "headline": "Computer Vision Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Rail AI Systems",
+            "title": "Vision Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Berlin Tech",
+            "degree": "MSc Robotics"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "OpenCV"
+          },
+          {
+            "skill_name": "OCR"
+          },
+          {
+            "skill_name": "Docker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_06_platform",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_06_platform.txt",
+      "input_text": "Emma Holt\nPlatform Engineer\nemma.holt@example.com\n+1 212 5550130\n\nExperience\nPlatform Engineer at CloudOps Inc\n\nEducation\nBSc Computer Science at Metro University\n\nSkills\nKubernetes, Docker, Python, AWS\n",
+      "expected": {
+        "full_name": "Emma Holt",
+        "email": "emma.holt@example.com",
+        "phone": "+1 212 5550130",
+        "location": null,
+        "headline": "Platform Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "CloudOps Inc",
+            "title": "Platform Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Metro University",
+            "degree": "BSc Computer Science"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Kubernetes"
+          },
+          {
+            "skill_name": "Docker"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "AWS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_07_analytics",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_07_analytics.txt",
+      "input_text": "Rahul Dutta\nAnalytics Engineer\nrahul.dutta@example.com\n+91 80 5550010\n\nExperience\nAnalytics Engineer at Data Bridge\n\nEducation\nBTech Information Systems at Institute of Tech\n\nSkills\nSQL, dbt, Python, Airflow\n",
+      "expected": {
+        "full_name": "Rahul Dutta",
+        "email": "rahul.dutta@example.com",
+        "phone": "+91 80 5550010",
+        "location": null,
+        "headline": "Analytics Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Data Bridge",
+            "title": "Analytics Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Institute of Tech",
+            "degree": "BTech Information Systems"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "dbt"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "Airflow"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_08_research",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_08_research.txt",
+      "input_text": "Sara Levin\nResearch Engineer\nsara.levin@example.com\n+972 3 5550188\n\nExperience\nResearch Engineer at Applied AI Lab\n\nEducation\nPhD Computer Science at National University\n\nSkills\nPython, PyTorch, Computer Vision, NLP\n",
+      "expected": {
+        "full_name": "Sara Levin",
+        "email": "sara.levin@example.com",
+        "phone": "+972 3 5550188",
+        "location": null,
+        "headline": "Research Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Applied AI Lab",
+            "title": "Research Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "National University",
+            "degree": "PhD Computer Science"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "PyTorch"
+          },
+          {
+            "skill_name": "Computer Vision"
+          },
+          {
+            "skill_name": "NLP"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_09_devops",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_09_devops.txt",
+      "input_text": "Victor Stone\nMLOps Engineer\nvictor.stone@example.com\n+1 206 5550117\n\nExperience\nMLOps Engineer at Pipeline Corp\n\nEducation\nBSc Software Engineering at West College\n\nSkills\nDocker, Kubernetes, Python, CI/CD\n",
+      "expected": {
+        "full_name": "Victor Stone",
+        "email": "victor.stone@example.com",
+        "phone": "+1 206 5550117",
+        "location": null,
+        "headline": "MLOps Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Pipeline Corp",
+            "title": "MLOps Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "West College",
+            "degree": "BSc Software Engineering"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Docker"
+          },
+          {
+            "skill_name": "Kubernetes"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "CI/CD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_10_fullstack",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_10_fullstack.txt",
+      "input_text": "Nora Wells\nFull Stack Developer\nnora.wells@example.com\n+1 303 5550181\n\nExperience\nSoftware Developer at Product Forge\n\nEducation\nBSc Computer Science at Colorado State\n\nSkills\nPython, FastAPI, React, PostgreSQL\n",
+      "expected": {
+        "full_name": "Nora Wells",
+        "email": "nora.wells@example.com",
+        "phone": "+1 303 5550181",
+        "location": null,
+        "headline": "Full Stack Developer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Product Forge",
+            "title": "Software Developer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Colorado State",
+            "degree": "BSc Computer Science"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "FastAPI"
+          },
+          {
+            "skill_name": "React"
+          },
+          {
+            "skill_name": "PostgreSQL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_11_security",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_11_security.txt",
+      "input_text": "Omar Saeed\nSecurity Engineer\nomar.saeed@example.com\n+971 4 5550199\n\nExperience\nSecurity Engineer at SecureStack\n\nEducation\nMSc Cybersecurity at Gulf Tech\n\nSkills\nPython, Security, Linux, SQL\n",
+      "expected": {
+        "full_name": "Omar Saeed",
+        "email": "omar.saeed@example.com",
+        "phone": "+971 4 5550199",
+        "location": null,
+        "headline": "Security Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "SecureStack",
+            "title": "Security Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Gulf Tech",
+            "degree": "MSc Cybersecurity"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "Security"
+          },
+          {
+            "skill_name": "Linux"
+          },
+          {
+            "skill_name": "SQL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_en_12_bi",
+      "language": "en",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_en_12_bi.txt",
+      "input_text": "Julia Meyer\nBI Engineer\njulia.meyer@example.com\n+49 89 5550200\n\nExperience\nBusiness Intelligence Engineer at Insight GmbH\n\nEducation\nBSc Business Informatics at Munich University\n\nSkills\nSQL, Power BI, Python, ETL\n",
+      "expected": {
+        "full_name": "Julia Meyer",
+        "email": "julia.meyer@example.com",
+        "phone": "+49 89 5550200",
+        "location": null,
+        "headline": "BI Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Insight GmbH",
+            "title": "Business Intelligence Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Munich University",
+            "degree": "BSc Business Informatics"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "Power BI"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "ETL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_01_data",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_01_data.txt",
+      "input_text": "Anna Beispiel\nDateningenieurin\nanna@example.de\n+49 151 11112222\n\nBerufserfahrung\nData Engineer bei Beispiel AG\n\nAusbildung\nMaster Informatik bei TU Muenchen\n\nKenntnisse\nPython, SQL, Airflow\n",
+      "expected": {
+        "full_name": "Anna Beispiel",
+        "email": "anna@example.de",
+        "phone": "+49 151 11112222",
+        "location": null,
+        "headline": "Dateningenieurin",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Beispiel AG",
+            "title": "Data Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "TU Muenchen",
+            "degree": "Master Informatik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "Airflow"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_02_backend",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_02_backend.txt",
+      "input_text": "Lukas Winter\nBackend Entwickler\nlukas.winter@example.de\n+49 170 22223333\n\nBerufserfahrung\nBackend Entwickler bei NordTech GmbH\n\nAusbildung\nBachelor Informatik bei FH Hamburg\n\nKenntnisse\nPython, FastAPI, PostgreSQL, Docker\n",
+      "expected": {
+        "full_name": "Lukas Winter",
+        "email": "lukas.winter@example.de",
+        "phone": "+49 170 22223333",
+        "location": null,
+        "headline": "Backend Entwickler",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "NordTech GmbH",
+            "title": "Backend Entwickler"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "FH Hamburg",
+            "degree": "Bachelor Informatik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "FastAPI"
+          },
+          {
+            "skill_name": "PostgreSQL"
+          },
+          {
+            "skill_name": "Docker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_03_ml",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_03_ml.txt",
+      "input_text": "Mara Klein\nMachine Learning Ingenieurin\nmara.klein@example.de\n+49 171 33334444\n\nBerufserfahrung\nML Ingenieurin bei VisionWerk\n\nAusbildung\nMaster Data Science bei TU Berlin\n\nKenntnisse\nPython, PyTorch, MLOps, SQL\n",
+      "expected": {
+        "full_name": "Mara Klein",
+        "email": "mara.klein@example.de",
+        "phone": "+49 171 33334444",
+        "location": null,
+        "headline": "Machine Learning Ingenieurin",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "VisionWerk",
+            "title": "ML Ingenieurin"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "TU Berlin",
+            "degree": "Master Data Science"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "PyTorch"
+          },
+          {
+            "skill_name": "MLOps"
+          },
+          {
+            "skill_name": "SQL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_04_nlp",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_04_nlp.txt",
+      "input_text": "Tobias Berg\nNLP Entwickler\ntobias.berg@example.de\n+49 172 44445555\n\nBerufserfahrung\nNLP Entwickler bei SprachSysteme\n\nAusbildung\nMaster Computerlinguistik bei Uni Stuttgart\n\nKenntnisse\nPython, NLP, LLM, Docker\n",
+      "expected": {
+        "full_name": "Tobias Berg",
+        "email": "tobias.berg@example.de",
+        "phone": "+49 172 44445555",
+        "location": null,
+        "headline": "NLP Entwickler",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "SprachSysteme",
+            "title": "NLP Entwickler"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Uni Stuttgart",
+            "degree": "Master Computerlinguistik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "NLP"
+          },
+          {
+            "skill_name": "LLM"
+          },
+          {
+            "skill_name": "Docker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_05_cv",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_05_cv.txt",
+      "input_text": "Lea Hartmann\nComputer Vision Ingenieurin\nlea.hartmann@example.de\n+49 173 55556666\n\nBerufserfahrung\nVision Ingenieurin bei BahnAnalytics\n\nAusbildung\nMaster Robotik bei TU Dortmund\n\nKenntnisse\nPython, OpenCV, OCR, C++\n",
+      "expected": {
+        "full_name": "Lea Hartmann",
+        "email": "lea.hartmann@example.de",
+        "phone": "+49 173 55556666",
+        "location": null,
+        "headline": "Computer Vision Ingenieurin",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "BahnAnalytics",
+            "title": "Vision Ingenieurin"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "TU Dortmund",
+            "degree": "Master Robotik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "OpenCV"
+          },
+          {
+            "skill_name": "OCR"
+          },
+          {
+            "skill_name": "C++"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_06_platform",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_06_platform.txt",
+      "input_text": "Jonas Neumann\nPlatform Engineer\njonas.neumann@example.de\n+49 174 66667777\n\nBerufserfahrung\nPlatform Engineer bei CloudWerk\n\nAusbildung\nBachelor Softwaretechnik bei HS Karlsruhe\n\nKenntnisse\nKubernetes, Docker, Python, AWS\n",
+      "expected": {
+        "full_name": "Jonas Neumann",
+        "email": "jonas.neumann@example.de",
+        "phone": "+49 174 66667777",
+        "location": null,
+        "headline": "Platform Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "CloudWerk",
+            "title": "Platform Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "HS Karlsruhe",
+            "degree": "Bachelor Softwaretechnik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Kubernetes"
+          },
+          {
+            "skill_name": "Docker"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "AWS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_07_analytics",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_07_analytics.txt",
+      "input_text": "Sophie Adler\nAnalytics Engineer\nsophie.adler@example.de\n+49 175 77778888\n\nBerufserfahrung\nAnalytics Engineer bei Datenraum\n\nAusbildung\nBachelor Wirtschaftsinformatik bei Uni Koeln\n\nKenntnisse\nSQL, dbt, Python, ETL\n",
+      "expected": {
+        "full_name": "Sophie Adler",
+        "email": "sophie.adler@example.de",
+        "phone": "+49 175 77778888",
+        "location": null,
+        "headline": "Analytics Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "Datenraum",
+            "title": "Analytics Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Uni Koeln",
+            "degree": "Bachelor Wirtschaftsinformatik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "dbt"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "ETL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_08_research",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_08_research.txt",
+      "input_text": "Felix Braun\nResearch Engineer\nfelix.braun@example.de\n+49 176 88889999\n\nBerufserfahrung\nResearch Engineer bei KI Labor\n\nAusbildung\nPhD Informatik bei Uni Bonn\n\nKenntnisse\nPython, Computer Vision, NLP, PyTorch\n",
+      "expected": {
+        "full_name": "Felix Braun",
+        "email": "felix.braun@example.de",
+        "phone": "+49 176 88889999",
+        "location": null,
+        "headline": "Research Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "KI Labor",
+            "title": "Research Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Uni Bonn",
+            "degree": "PhD Informatik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "Computer Vision"
+          },
+          {
+            "skill_name": "NLP"
+          },
+          {
+            "skill_name": "PyTorch"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_09_devops",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_09_devops.txt",
+      "input_text": "Nina Roth\nMLOps Engineer\nnina.roth@example.de\n+49 177 99990000\n\nBerufserfahrung\nMLOps Engineer bei PipelineWerk\n\nAusbildung\nMaster Informatik bei TU Dresden\n\nKenntnisse\nDocker, Kubernetes, Python, CI/CD\n",
+      "expected": {
+        "full_name": "Nina Roth",
+        "email": "nina.roth@example.de",
+        "phone": "+49 177 99990000",
+        "location": null,
+        "headline": "MLOps Engineer",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "PipelineWerk",
+            "title": "MLOps Engineer"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "TU Dresden",
+            "degree": "Master Informatik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "Docker"
+          },
+          {
+            "skill_name": "Kubernetes"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "CI/CD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cv_de_10_bi",
+      "language": "de",
+      "source_type": "cv_document",
+      "source_locator": "fixtures/cv_de_10_bi.txt",
+      "input_text": "Paul Fischer\nBI Entwickler\npaul.fischer@example.de\n+49 178 11110000\n\nBerufserfahrung\nBI Entwickler bei InsightHaus\n\nAusbildung\nBachelor Wirtschaftsinformatik bei Uni Mannheim\n\nKenntnisse\nSQL, Power BI, Python, ETL\n",
+      "expected": {
+        "full_name": "Paul Fischer",
+        "email": "paul.fischer@example.de",
+        "phone": "+49 178 11110000",
+        "location": null,
+        "headline": "BI Entwickler",
+        "summary": null,
+        "experiences": [
+          {
+            "company": "InsightHaus",
+            "title": "BI Entwickler"
+          }
+        ],
+        "educations": [
+          {
+            "institution": "Uni Mannheim",
+            "degree": "Bachelor Wirtschaftsinformatik"
+          }
+        ],
+        "skills": [
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "Power BI"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "ETL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_en_01_clean",
+      "language": "en",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_en_01_clean",
+      "input_text": "Md Mahmudul Haque\nAI Engineer \u2022 Computer Vision \u2022 NLP \u2022 LLMs/VLMs\nSkills: Python \u2022 NLP \u2022 Computer Vision \u2022 OCR\nSenior AI Engineer at Fraunhofer IML.\nNLP Engineer at Henkel.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Md Mahmudul Haque",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "AI Engineer \u2022 Computer Vision \u2022 NLP \u2022 LLMs/VLMs",
+        "summary": "AI Engineer \u2022 Computer Vision \u2022 NLP \u2022 LLMs/VLMs",
+        "experiences": [
+          {
+            "company": "Fraunhofer IML.",
+            "title": "Senior AI Engineer"
+          },
+          {
+            "company": "Henkel.",
+            "title": "NLP Engineer"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "NLP"
+          },
+          {
+            "skill_name": "Computer Vision"
+          },
+          {
+            "skill_name": "OCR"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_en_02_noisy_nav",
+      "language": "en",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_en_02_noisy_nav",
+      "input_text": "Arfan Example\nSkip to primary navigation\nData Engineer \u2022 NLP \u2022 Automation\nSkills: Python \u2022 SQL \u2022 Airflow \u2022 NLP\nToggle menu\nPowered by Jekyll\nData Engineer at Northwind Analytics.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Arfan Example",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "Data Engineer \u2022 NLP \u2022 Automation",
+        "summary": "Data Engineer \u2022 NLP \u2022 Automation",
+        "experiences": [
+          {
+            "company": "Northwind Analytics.",
+            "title": "Data Engineer"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "Airflow"
+          },
+          {
+            "skill_name": "NLP"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_en_03_projects",
+      "language": "en",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_en_03_projects",
+      "input_text": "Lena Brooks\nNLP Engineer \u2022 Applied AI\nSkills: Python \u2022 NLP \u2022 LLM \u2022 FastAPI\nNLP Engineer at Language Works.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Lena Brooks",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "NLP Engineer \u2022 Applied AI",
+        "summary": "NLP Engineer \u2022 Applied AI",
+        "experiences": [
+          {
+            "company": "Language Works.",
+            "title": "NLP Engineer"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "NLP"
+          },
+          {
+            "skill_name": "LLM"
+          },
+          {
+            "skill_name": "FastAPI"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_en_04_single",
+      "language": "en",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_en_04_single",
+      "input_text": "Noah Kim\nSkip to primary navigation\nMachine Learning Engineer \u2022 MLOps\nSkills: Python \u2022 PyTorch \u2022 Docker \u2022 Kubernetes\nToggle menu\nPowered by Jekyll\nML Engineer at Vision Labs.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Noah Kim",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "Machine Learning Engineer \u2022 MLOps",
+        "summary": "Machine Learning Engineer \u2022 MLOps",
+        "experiences": [
+          {
+            "company": "Vision Labs.",
+            "title": "ML Engineer"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "PyTorch"
+          },
+          {
+            "skill_name": "Docker"
+          },
+          {
+            "skill_name": "Kubernetes"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_en_05_cv",
+      "language": "en",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_en_05_cv",
+      "input_text": "Emma Holt\nPlatform Engineer \u2022 Cloud Systems\nSkills: AWS \u2022 Kubernetes \u2022 Docker \u2022 Python\nPlatform Engineer at CloudOps Inc.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Emma Holt",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "Platform Engineer \u2022 Cloud Systems",
+        "summary": "Platform Engineer \u2022 Cloud Systems",
+        "experiences": [
+          {
+            "company": "CloudOps Inc.",
+            "title": "Platform Engineer"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "AWS"
+          },
+          {
+            "skill_name": "Kubernetes"
+          },
+          {
+            "skill_name": "Docker"
+          },
+          {
+            "skill_name": "Python"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_de_01_clean",
+      "language": "de",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_de_01_clean",
+      "input_text": "Anna Beispiel\nDateningenieurin \u2022 ETL \u2022 Analytics\nSkills: Python \u2022 SQL \u2022 Airflow \u2022 dbt\nData Engineer bei Beispiel AG.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Anna Beispiel",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "Dateningenieurin \u2022 ETL \u2022 Analytics",
+        "summary": "Dateningenieurin \u2022 ETL \u2022 Analytics",
+        "experiences": [
+          {
+            "company": "Beispiel AG.",
+            "title": "Data Engineer"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "Airflow"
+          },
+          {
+            "skill_name": "dbt"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_de_02_noisy",
+      "language": "de",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_de_02_noisy",
+      "input_text": "Lukas Winter\nSkip to primary navigation\nBackend Entwickler \u2022 APIs \u2022 Daten\nSkills: Python \u2022 FastAPI \u2022 PostgreSQL \u2022 Docker\nToggle menu\nPowered by Jekyll\nBackend Entwickler bei NordTech GmbH.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Lukas Winter",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "Backend Entwickler \u2022 APIs \u2022 Daten",
+        "summary": "Backend Entwickler \u2022 APIs \u2022 Daten",
+        "experiences": [
+          {
+            "company": "NordTech GmbH.",
+            "title": "Backend Entwickler"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "FastAPI"
+          },
+          {
+            "skill_name": "PostgreSQL"
+          },
+          {
+            "skill_name": "Docker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_de_03_ml",
+      "language": "de",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_de_03_ml",
+      "input_text": "Mara Klein\nML Ingenieurin \u2022 Computer Vision\nSkills: Python \u2022 PyTorch \u2022 Computer Vision \u2022 MLOps\nML Ingenieurin bei VisionWerk.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Mara Klein",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "ML Ingenieurin \u2022 Computer Vision",
+        "summary": "ML Ingenieurin \u2022 Computer Vision",
+        "experiences": [
+          {
+            "company": "VisionWerk.",
+            "title": "ML Ingenieurin"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "PyTorch"
+          },
+          {
+            "skill_name": "Computer Vision"
+          },
+          {
+            "skill_name": "MLOps"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_de_04_nlp",
+      "language": "de",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_de_04_nlp",
+      "input_text": "Tobias Berg\nSkip to primary navigation\nNLP Entwickler \u2022 Sprachsysteme\nSkills: Python \u2022 NLP \u2022 LLM \u2022 Docker\nToggle menu\nPowered by Jekyll\nNLP Entwickler bei SprachSysteme.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Tobias Berg",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "NLP Entwickler \u2022 Sprachsysteme",
+        "summary": "NLP Entwickler \u2022 Sprachsysteme",
+        "experiences": [
+          {
+            "company": "SprachSysteme.",
+            "title": "NLP Entwickler"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "NLP"
+          },
+          {
+            "skill_name": "LLM"
+          },
+          {
+            "skill_name": "Docker"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portfolio_de_05_bi",
+      "language": "de",
+      "source_type": "portfolio_website",
+      "source_locator": "https://portfolio.example.dev/portfolio_de_05_bi",
+      "input_text": "Paul Fischer\nBI Entwickler \u2022 Datenplattform\nSkills: SQL \u2022 Power BI \u2022 Python \u2022 ETL\nBI Entwickler bei InsightHaus.\nProjects\nExperience\n",
+      "expected": {
+        "full_name": "Paul Fischer",
+        "email": null,
+        "phone": null,
+        "location": null,
+        "headline": "BI Entwickler \u2022 Datenplattform",
+        "summary": "BI Entwickler \u2022 Datenplattform",
+        "experiences": [
+          {
+            "company": "InsightHaus.",
+            "title": "BI Entwickler"
+          }
+        ],
+        "educations": [],
+        "skills": [
+          {
+            "skill_name": "SQL"
+          },
+          {
+            "skill_name": "Power BI"
+          },
+          {
+            "skill_name": "Python"
+          },
+          {
+            "skill_name": "ETL"
+          }
+        ]
+      }
+    }
+  ]
+}

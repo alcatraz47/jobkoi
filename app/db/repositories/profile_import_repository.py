@@ -40,6 +40,7 @@ class ImportFieldPayload:
     extracted_value: str
     suggested_value: str
     confidence_score: int
+    decision_status: str
     sort_order: int
 
 
@@ -159,6 +160,7 @@ class ProfileImportRepository:
                     extracted_value=item.extracted_value,
                     suggested_value=item.suggested_value,
                     confidence_score=item.confidence_score,
+                    decision_status=item.decision_status,
                     sort_order=item.sort_order,
                 )
                 for item in payload.fields

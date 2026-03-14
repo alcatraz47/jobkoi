@@ -40,6 +40,16 @@ class ImportedSkillDraft:
 
 
 @dataclass(frozen=True)
+class ImportedUnmappedCandidate:
+    """Unmapped extraction candidate retained for reviewer visibility."""
+
+    text: str
+    section_hint: str | None = None
+    reason: str | None = None
+    source_locator: str | None = None
+
+
+@dataclass(frozen=True)
 class ImportedProfileDraft:
     """Structured imported profile draft aligned with master profile schema."""
 
@@ -52,6 +62,7 @@ class ImportedProfileDraft:
     experiences: list[ImportedExperienceDraft] = field(default_factory=list)
     educations: list[ImportedEducationDraft] = field(default_factory=list)
     skills: list[ImportedSkillDraft] = field(default_factory=list)
+    unmapped_candidates: list[ImportedUnmappedCandidate] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

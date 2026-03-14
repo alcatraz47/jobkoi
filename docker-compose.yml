@@ -13,6 +13,8 @@ services:
       JOBKOI_SQLALCHEMY_ECHO: "false"
       JOBKOI_DOCUMENT_STORAGE_DIR: /var/lib/jobkoi/documents
       JOBKOI_IMPORT_STORAGE_DIR: /var/lib/jobkoi/imports
+      JOBKOI_PROFILE_IMPORT_AUTO_APPROVE_ENABLED: "true"
+      JOBKOI_PROFILE_IMPORT_AUTO_APPROVE_MIN_CONFIDENCE: "94"
       JOBKOI_OLLAMA_BASE_URL: http://host.docker.internal:11434
       JOBKOI_OLLAMA_MODEL: qwen2.5:3b
       JOBKOI_OLLAMA_TIMEOUT_SECONDS: "120"

@@ -1,0 +1,16 @@
+{
+  "policy_version": "2026-03-14",
+  "auto_approve": {
+    "enabled": true,
+    "sections": {
+      "skill": 94
+    }
+  },
+  "manual_review_sections": [
+    "personal",
+    "summary",
+    "experience",
+    "education"
+  ],
+  "notes": "Thresholds are calibrated from golden cases and then tightened conservatively to keep auto-approval limited to low-risk skill rows."
+}
