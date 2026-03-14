@@ -4,33 +4,37 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from app.core.config import get_settings
 from app.llm.client import OllamaClient, OllamaClientSettings
 
 
 @lru_cache(maxsize=1)
 def get_ollama_client(
     *,
-    base_url: str = "http://127.0.0.1:11434",
-    model: str = "qwen2.5:3b-instruct",
-    timeout_seconds: float = 30.0,
-    max_retries: int = 1,
+    base_url: str | None = None,
+    model: str | None = None,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
 ) -> OllamaClient:
     """Return a cached Ollama client instance.
 
     Args:
-        base_url: Ollama base URL.
-        model: Model name configured in local Ollama.
-        timeout_seconds: Request timeout in seconds.
-        max_retries: Number of retry attempts after initial call.
+        base_url: Optional Ollama base URL override.
+        model: Optional model name override.
+        timeout_seconds: Optional request timeout override in seconds.
+        max_retries: Optional retry attempts after initial call.
 
     Returns:
         Cached Ollama client instance.
     """
 
-    settings = OllamaClientSettings(
-        base_url=base_url,
-        model=model,
-        timeout_seconds=timeout_seconds,
-        max_retries=max_retries,
+    settings = get_settings()
+    client_settings = OllamaClientSettings(
+        base_url=base_url or settings.ollama_base_url,
+        model=model or settings.ollama_model,
+        timeout_seconds=timeout_seconds
+        if timeout_seconds is not None
+        else settings.ollama_timeout_seconds,
+        max_retries=max_retries if max_retries is not None else settings.ollama_max_retries,
     )
-    return OllamaClient(settings=settings)
+    return OllamaClient(settings=client_settings)

@@ -28,8 +28,8 @@ class OllamaClientSettings:
     """
 
     base_url: str = "http://127.0.0.1:11434"
-    model: str = "qwen2.5:3b-instruct"
-    timeout_seconds: float = 30.0
+    model: str = "qwen2.5:3b"
+    timeout_seconds: float = 120.0
     max_retries: int = 1
 
 
@@ -116,6 +116,65 @@ class OllamaClient:
             return parse_structured_output(raw, schema)
 
         return self._call_with_retries(operation=operation)
+
+    def get_server_version(self) -> str:
+        """Fetch Ollama server version.
+
+        Returns:
+            Ollama version string.
+
+        Raises:
+            LlmTransportError: If Ollama is unreachable or returns invalid payload.
+        """
+
+        decoded = self._request_json("GET", "/api/version")
+        version = decoded.get("version")
+        if not isinstance(version, str) or not version.strip():
+            raise LlmTransportError("Ollama version response is missing 'version'.")
+        return version.strip()
+
+    def is_model_available(self) -> bool:
+        """Return whether configured model is available in Ollama.
+
+        Returns:
+            True when model exists, otherwise False.
+
+        Raises:
+            LlmTransportError: If transport fails or unexpected HTTP status is returned.
+        """
+
+        endpoint = f"{self._settings.base_url.rstrip('/')}/api/show"
+        payload = {"model": self._settings.model}
+        try:
+            response = self._http_client.post(endpoint, json=payload)
+        except httpx.HTTPError as exc:
+            raise LlmTransportError(f"Failed to contact Ollama: {exc}") from exc
+
+        if response.status_code == 404:
+            return False
+
+        if response.status_code >= 400:
+            raise LlmTransportError(
+                f"Ollama returned HTTP {response.status_code}: {response.text}"
+            )
+
+        return True
+
+    def warmup_model(self) -> str:
+        """Warm up the configured model with a lightweight call.
+
+        Returns:
+            Model response text.
+
+        Raises:
+            LlmTransportError: If warm-up call cannot be completed.
+        """
+
+        return self.generate_text(
+            prompt="Reply with OK.",
+            system_prompt="Respond with OK only.",
+            temperature=0.0,
+        )
 
     def close(self) -> None:
         """Close underlying HTTP resources."""
@@ -227,3 +286,37 @@ class OllamaClient:
             raise LlmTransportError("Ollama response missing text content.")
 
         return content.strip()
+
+    def _request_json(self, method: str, path: str) -> dict[str, object]:
+        """Execute request and decode JSON object response.
+
+        Args:
+            method: HTTP method.
+            path: Relative Ollama API path.
+
+        Returns:
+            JSON object payload.
+
+        Raises:
+            LlmTransportError: If request fails or response is not a JSON object.
+        """
+
+        endpoint = f"{self._settings.base_url.rstrip('/')}/{path.lstrip('/')}"
+        try:
+            response = self._http_client.request(method=method, url=endpoint)
+        except httpx.HTTPError as exc:
+            raise LlmTransportError(f"Failed to contact Ollama: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise LlmTransportError(
+                f"Ollama returned HTTP {response.status_code}: {response.text}"
+            )
+
+        try:
+            decoded = response.json()
+        except ValueError as exc:
+            raise LlmTransportError("Ollama response is not valid JSON.") from exc
+
+        if not isinstance(decoded, dict):
+            raise LlmTransportError("Ollama response JSON must be an object.")
+        return decoded

@@ -78,6 +78,12 @@ Health check:
 curl http://127.0.0.1:8000/api/v1/health
 ```
 
+LLM readiness check (optional warm-up):
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/health/llm?warmup=true"
+```
+
 Stop all services:
 
 ```bash

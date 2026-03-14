@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import re
 import zipfile
 from dataclasses import dataclass
@@ -15,6 +14,57 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 
 from app.domain.job_text import normalize_text
+
+_DEFAULT_FETCH_HEADERS: dict[str, str] = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
+}
+
+_BLOCK_BREAK_TAGS: set[str] = {
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "br",
+    "div",
+    "dl",
+    "dt",
+    "dd",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+}
+
+_SUPPRESSED_TAGS: set[str] = {"script", "style", "noscript", "svg"}
 
 
 class ProfileImportExtractionError(Exception):
@@ -126,26 +176,33 @@ class WebsiteImportExtractor:
         if not normalized_url:
             raise ProfileImportExtractionError("Invalid website URL.")
 
-        domain = urlparse(normalized_url).netloc
+        page_limit = max(1, max_pages)
+        domain = urlparse(normalized_url).netloc.lower()
         queue: list[str] = [normalized_url]
         visited: set[str] = set()
         pages: list[WebsitePageResult] = []
 
-        while queue and len(pages) < max_pages:
+        while queue and len(pages) < page_limit:
             current_url = queue.pop(0)
             if current_url in visited:
                 continue
             visited.add(current_url)
 
-            html = self._fetch_html(current_url)
+            try:
+                html = self._fetch_html(current_url)
+            except ProfileImportExtractionError:
+                if current_url == normalized_url:
+                    raise
+                continue
+
             text = _extract_website_text(html=html, url=current_url)
             if text:
-                pages.append(WebsitePageResult(url=current_url, text=normalize_text(text)))
+                pages.append(WebsitePageResult(url=current_url, text=text))
 
             for link in _extract_same_domain_links(html=html, base_url=current_url, domain=domain):
                 if link in visited or link in queue:
                     continue
-                if len(queue) + len(pages) >= max_pages * 3:
+                if len(queue) + len(pages) >= page_limit * 3:
                     break
                 queue.append(link)
 
@@ -240,6 +297,10 @@ def _extract_docx_text(file_path: Path) -> str:
 def _extract_pdf_text(file_path: Path) -> str:
     """Extract readable text from PDF bytes using fallback heuristics."""
 
+    pypdf_text = _extract_pdf_text_with_pypdf(file_path)
+    if pypdf_text:
+        return pypdf_text
+
     data = file_path.read_bytes()
     chunks = re.findall(rb"\(([^\)]{1,500})\)\s*Tj", data)
 
@@ -254,6 +315,40 @@ def _extract_pdf_text(file_path: Path) -> str:
     return text
 
 
+def _extract_pdf_text_with_pypdf(file_path: Path) -> str:
+    """Extract text from PDF using pypdf when available.
+
+    Args:
+        file_path: PDF file path.
+
+    Returns:
+        Extracted PDF text, or empty string when unavailable.
+    """
+
+    try:
+        from pypdf import PdfReader  # type: ignore[import-not-found]
+    except Exception:
+        return ""
+
+    try:
+        reader = PdfReader(str(file_path))
+    except Exception:
+        return ""
+
+    parts: list[str] = []
+    for page in reader.pages:
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            continue
+
+        cleaned = normalize_text(text)
+        if cleaned:
+            parts.append(cleaned)
+
+    return "\n".join(parts)
+
+
 def _strip_xml_tags(xml_text: str) -> str:
     """Strip XML tags from text and compact whitespace."""
 
@@ -265,18 +360,89 @@ def _strip_xml_tags(xml_text: str) -> str:
 
 
 def _fetch_html_default(url: str) -> str:
-    """Fetch one HTML page via HTTP."""
+    """Fetch one HTML page via HTTP.
+
+    Uses TLS verification by default and retries once without certificate
+    verification when the failure is specifically a certificate validation issue.
+    Falls back to ``http://`` when the provided ``https://`` endpoint cannot be
+    reached.
+
+    Args:
+        url: URL to fetch.
+
+    Returns:
+        Response HTML body.
+
+    Raises:
+        ProfileImportExtractionError: If the page cannot be fetched.
+    """
 
     try:
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        return _fetch_html_with_verify(url=url, verify=True)
+    except ProfileImportExtractionError as primary_error:
+        if _is_tls_verification_error(primary_error):
+            try:
+                return _fetch_html_with_verify(url=url, verify=False)
+            except ProfileImportExtractionError:
+                pass
+
+        parsed = urlparse(url)
+        if parsed.scheme == "https":
+            http_url = urlunparse(parsed._replace(scheme="http"))
+            return _fetch_html_with_verify(url=http_url, verify=True)
+
+        raise primary_error
+
+
+def _fetch_html_with_verify(*, url: str, verify: bool) -> str:
+    """Fetch HTML with explicit TLS verification behavior.
+
+    Args:
+        url: URL to fetch.
+        verify: TLS verification toggle.
+
+    Returns:
+        Response HTML body.
+
+    Raises:
+        ProfileImportExtractionError: If HTTP request fails.
+    """
+
+    try:
+        with httpx.Client(
+            timeout=20.0,
+            follow_redirects=True,
+            headers=_DEFAULT_FETCH_HEADERS,
+            verify=verify,
+        ) as client:
             response = client.get(url)
     except httpx.HTTPError as exc:
-        raise ProfileImportExtractionError(f"Failed to fetch URL: {url}") from exc
+        raise ProfileImportExtractionError(f"Failed to fetch URL: {url} ({exc})") from exc
 
     if response.status_code >= 400:
         raise ProfileImportExtractionError(f"URL returned HTTP {response.status_code}: {url}")
 
     return response.text
+
+
+def _is_tls_verification_error(error: BaseException) -> bool:
+    """Return whether an exception likely indicates TLS verification failure.
+
+    Args:
+        error: Exception instance.
+
+    Returns:
+        True when error text matches certificate verification failures.
+    """
+
+    lowered = str(error).lower()
+    patterns = (
+        "certificate verify failed",
+        "self signed certificate",
+        "unable to get local issuer certificate",
+        "tlsv",
+    )
+    return any(pattern in lowered for pattern in patterns)
 
 
 def _is_trafilatura_available() -> bool:
@@ -303,14 +469,15 @@ def _extract_website_text(*, html: str, url: str) -> str:
             output_format="txt",
         )
         if isinstance(extracted, str) and extracted.strip():
-            return extracted
+            return _normalize_multiline_text(extracted)
     except Exception:
         pass
 
     parser = _HtmlTextParser()
     parser.feed(html)
     parser.close()
-    return normalize_text(" ".join(parser.parts))
+    fallback_text = "\n".join(parser.parts)
+    return _normalize_multiline_text(fallback_text)
 
 
 def _extract_same_domain_links(*, html: str, base_url: str, domain: str) -> list[str]:
@@ -322,12 +489,13 @@ def _extract_same_domain_links(*, html: str, base_url: str, domain: str) -> list
 
     links: list[str] = []
     seen: set[str] = set()
+    normalized_domain = domain.lower()
     for href in parser.links:
         absolute = _normalize_url(urljoin(base_url, href))
         if not absolute:
             continue
         parsed = urlparse(absolute)
-        if parsed.netloc != domain:
+        if parsed.netloc.lower() != normalized_domain:
             continue
         if absolute in seen:
             continue
@@ -337,16 +505,85 @@ def _extract_same_domain_links(*, html: str, base_url: str, domain: str) -> list
 
 
 def _normalize_url(url: str) -> str:
-    """Normalize and validate URL for crawling."""
+    """Normalize and validate URL for crawling.
 
-    parsed = urlparse(url.strip())
+    Supports bare domains by defaulting to ``https://``.
+
+    Args:
+        url: Raw URL input.
+
+    Returns:
+        Normalized absolute URL or empty string when invalid.
+    """
+
+    candidate = url.strip()
+    if not candidate:
+        return ""
+
+    parsed = urlparse(candidate)
+    if not parsed.scheme:
+        parsed = urlparse(f"https://{candidate}")
+
     if parsed.scheme not in {"http", "https"}:
         return ""
     if not parsed.netloc:
         return ""
+    if any(char.isspace() for char in parsed.netloc):
+        return ""
 
     normalized = parsed._replace(fragment="", query="")
     return urlunparse(normalized)
+
+
+def _normalize_multiline_text(text: str) -> str:
+    """Normalize multi-line extracted text while preserving structure.
+
+    Args:
+        text: Raw extracted text.
+
+    Returns:
+        Cleaned newline-separated text.
+    """
+
+    lines = [normalize_text(line) for line in text.splitlines()]
+    compact_lines: list[str] = []
+    for line in lines:
+        if not line:
+            continue
+        if _is_noise_line(line):
+            continue
+        if compact_lines and compact_lines[-1] == line:
+            continue
+        compact_lines.append(line)
+    return "\n".join(compact_lines)
+
+
+def _is_noise_line(line: str) -> bool:
+    """Return whether extracted line is likely navigation or boilerplate noise.
+
+    Args:
+        line: Normalized line text.
+
+    Returns:
+        True when line should be skipped from extracted content.
+    """
+
+    lowered = line.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "skip to",
+            "toggle menu",
+            "powered by",
+            "document.documentelement",
+            "no-js",
+            "primary navigation",
+            "footer",
+        )
+    ):
+        return True
+
+    return False
 
 
 class _HtmlTextParser(HTMLParser):
@@ -357,9 +594,36 @@ class _HtmlTextParser(HTMLParser):
 
         super().__init__()
         self.parts: list[str] = []
+        self._suppressed_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Track block and suppressed tags for text extraction."""
+
+        lowered = tag.lower()
+        if lowered in _SUPPRESSED_TAGS:
+            self._suppressed_depth += 1
+            return
+
+        if lowered in _BLOCK_BREAK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        """Close block and suppressed tags for text extraction."""
+
+        lowered = tag.lower()
+        if lowered in _SUPPRESSED_TAGS:
+            if self._suppressed_depth > 0:
+                self._suppressed_depth -= 1
+            return
+
+        if lowered in _BLOCK_BREAK_TAGS:
+            self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
         """Append non-empty text segments."""
+
+        if self._suppressed_depth > 0:
+            return
 
         cleaned = normalize_text(data)
         if cleaned:

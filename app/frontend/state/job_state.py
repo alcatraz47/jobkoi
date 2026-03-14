@@ -16,6 +16,7 @@ class JobIntakeDraft:
     job_url: str | None = None
     language: str = "en"
     notes: str | None = None
+    use_llm_analysis: bool = False
 
 
 @dataclass

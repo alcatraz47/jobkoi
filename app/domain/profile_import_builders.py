@@ -15,7 +15,7 @@ from app.domain.profile_import_types import (
 
 _EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_PATTERN = re.compile(r"\+?[0-9][0-9\s().-]{6,}[0-9]")
-_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z' -]{2,80}$")
+_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z' .-]{2,80}$")
 _YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
 _EXPERIENCE_PATTERN = re.compile(r"^(?P<title>.+?)\s+(?:at|@|bei)\s+(?P<company>.+)$", re.IGNORECASE)
 _SKILLS_SPLIT_PATTERN = re.compile(r"[,|/•;]")
@@ -53,6 +53,28 @@ _DEGREE_MARKERS = (
     "diplom",
     "degree",
 )
+
+_SKILL_KEYWORDS: dict[str, str] = {
+    "python": "Python",
+    "sql": "SQL",
+    "fastapi": "FastAPI",
+    "docker": "Docker",
+    "kubernetes": "Kubernetes",
+    "computer vision": "Computer Vision",
+    "opencv": "OpenCV",
+    "ocr": "OCR",
+    "nlp": "NLP",
+    "large language model": "LLM",
+    "llm": "LLM",
+    "vlm": "VLM",
+    "pytorch": "PyTorch",
+    "tensorflow": "TensorFlow",
+    "scikit-learn": "Scikit-learn",
+    "pandas": "Pandas",
+    "aws": "AWS",
+    "azure": "Azure",
+    "gcp": "GCP",
+}
 
 
 def build_imported_profile_from_text(
@@ -240,22 +262,31 @@ def _extract_email(text: str) -> str | None:
 def _extract_phone(text: str) -> str | None:
     """Extract first plausible phone number from text."""
 
-    match = _PHONE_PATTERN.search(text)
-    if match is None:
-        return None
-    return normalize_text(match.group(0))
+    for match in _PHONE_PATTERN.finditer(text):
+        candidate = normalize_text(match.group(0))
+        digits = re.sub(r"\D", "", candidate)
+        if len(digits) < 7 or len(digits) > 15:
+            continue
+        if len(digits) == 13 and digits.startswith(("978", "979")):
+            continue
+        return candidate
+
+    return None
 
 
 def _extract_full_name(lines: list[str]) -> str | None:
     """Extract probable full name from header lines."""
 
-    for line in lines[:6]:
+    for line in lines[:8]:
         if "@" in line:
             continue
         if any(char.isdigit() for char in line):
             continue
+        if any(symbol in line for symbol in {"{", "}", "http", "©"}):
+            continue
         if not _NAME_PATTERN.match(line):
             continue
+
         words = line.split()
         if 2 <= len(words) <= 5:
             return line
@@ -265,14 +296,17 @@ def _extract_full_name(lines: list[str]) -> str | None:
 def _extract_headline(lines: list[str], full_name: str | None) -> str | None:
     """Extract probable professional headline."""
 
-    for line in lines[:10]:
+    for line in lines[:14]:
+        lowered = line.lower()
         if full_name and line == full_name:
             continue
         if "@" in line or _EMAIL_PATTERN.search(line):
             continue
-        if any(alias in line.lower() for alias in _SECTION_ALIASES["experience"]):
+        if _is_noise_heading_line(lowered):
             continue
-        if 6 <= len(line) <= 90:
+        if any(alias in lowered for alias in _SECTION_ALIASES["experience"]):
+            continue
+        if 6 <= len(line) <= 110:
             return line
     return None
 
@@ -281,19 +315,27 @@ def _extract_summary(lines: list[str]) -> str | None:
     """Extract a compact summary from top lines."""
 
     summary_lines: list[str] = []
-    for line in lines[2:10]:
+    for line in lines[2:20]:
         lowered = line.lower()
-        if any(alias in lowered for aliases in _SECTION_ALIASES.values() for alias in aliases):
+        if _looks_like_section_heading(line):
             break
+        if _is_noise_heading_line(lowered):
+            continue
         if _EMAIL_PATTERN.search(line) or _PHONE_PATTERN.search(line):
+            continue
+        if len(line) < 20:
             continue
         summary_lines.append(line)
         if len(summary_lines) >= 3:
             break
 
-    if not summary_lines:
-        return None
-    return " ".join(summary_lines)
+    if summary_lines:
+        return " ".join(summary_lines)
+
+    for line in lines[:20]:
+        if 40 <= len(line) <= 220:
+            return line
+    return None
 
 
 def _extract_section_entries(
@@ -308,27 +350,63 @@ def _extract_section_entries(
 
     active_section = ""
     for line in lines:
-        section = _detect_section(line)
+        section, remainder = _detect_section_and_remainder(line)
         if section:
             active_section = section
+            if remainder:
+                _append_section_content(
+                    section=section,
+                    line=remainder,
+                    source_locator=source_locator,
+                    experiences=experiences,
+                    educations=educations,
+                    skills=skills,
+                )
             continue
 
-        if active_section == "experience":
-            item = _parse_experience_line(line, source_locator)
-            if item is not None:
-                experiences.append(item)
+        if not active_section:
             continue
 
-        if active_section == "education":
-            item = _parse_education_line(line, source_locator)
-            if item is not None:
-                educations.append(item)
-            continue
+        _append_section_content(
+            section=active_section,
+            line=line,
+            source_locator=source_locator,
+            experiences=experiences,
+            educations=educations,
+            skills=skills,
+        )
 
-        if active_section == "skills":
-            skills.extend(_parse_skill_line(line, source_locator))
+    if not experiences:
+        experiences = _extract_inline_experiences(lines, source_locator)
 
     return experiences, educations, _deduplicate_skills(skills)
+
+
+def _append_section_content(
+    *,
+    section: str,
+    line: str,
+    source_locator: str | None,
+    experiences: list[ImportedExperienceDraft],
+    educations: list[ImportedEducationDraft],
+    skills: list[ImportedSkillDraft],
+) -> None:
+    """Append parsed section content to draft collections."""
+
+    if section == "experience":
+        item = _parse_experience_line(line, source_locator)
+        if item is not None:
+            experiences.append(item)
+        return
+
+    if section == "education":
+        item = _parse_education_line(line, source_locator)
+        if item is not None:
+            educations.append(item)
+        return
+
+    if section == "skills":
+        skills.extend(_parse_skill_line(line, source_locator))
 
 
 def _extract_inline_skills(lines: list[str], source_locator: str | None) -> list[ImportedSkillDraft]:
@@ -337,47 +415,132 @@ def _extract_inline_skills(lines: list[str], source_locator: str | None) -> list
     candidates: list[ImportedSkillDraft] = []
     for line in lines:
         lowered = line.lower()
-        if "python" in lowered:
-            candidates.append(ImportedSkillDraft(skill_name="Python", source_locator=source_locator))
-        if "sql" in lowered:
-            candidates.append(ImportedSkillDraft(skill_name="SQL", source_locator=source_locator))
-        if "fastapi" in lowered:
-            candidates.append(ImportedSkillDraft(skill_name="FastAPI", source_locator=source_locator))
-        if "docker" in lowered:
-            candidates.append(ImportedSkillDraft(skill_name="Docker", source_locator=source_locator))
-        if "kubernetes" in lowered:
-            candidates.append(ImportedSkillDraft(skill_name="Kubernetes", source_locator=source_locator))
+        for keyword, label in _SKILL_KEYWORDS.items():
+            if keyword in lowered:
+                candidates.append(ImportedSkillDraft(skill_name=label, source_locator=source_locator))
+
     return _deduplicate_skills(candidates)
 
 
-def _detect_section(line: str) -> str:
-    """Detect which structured section a heading line belongs to."""
+def _detect_section_and_remainder(line: str) -> tuple[str, str]:
+    """Detect section heading and inline remainder content.
 
-    lowered = line.lower().strip(":")
+    Args:
+        line: Current source line.
+
+    Returns:
+        Tuple of section key and heading remainder content.
+    """
+
+    normalized = normalize_text(line)
+    lowered = normalized.lower()
+
     for section, aliases in _SECTION_ALIASES.items():
-        if lowered in aliases:
-            return section
-    return ""
+        for alias in aliases:
+            alias_lower = alias.lower()
+            if lowered == alias_lower:
+                return section, ""
+
+            for delimiter in (":", "-", "|"):
+                prefix = f"{alias_lower}{delimiter}"
+                if lowered.startswith(prefix):
+                    remainder = normalize_text(normalized[len(alias) + 1 :])
+                    return section, remainder
+
+            spaced_prefix = f"{alias_lower} "
+            if lowered.startswith(spaced_prefix):
+                remainder = normalize_text(normalized[len(alias) :])
+                return section, remainder
+
+    return "", ""
+
+
+def _is_noise_heading_line(lowered_line: str) -> bool:
+    """Return whether heading candidate is obvious website navigation noise."""
+
+    return any(
+        marker in lowered_line
+        for marker in (
+            "skip to",
+            "toggle menu",
+            "primary navigation",
+            "footer",
+            "powered by",
+            "home /",
+            "document.documentelement",
+        )
+    )
+
+
+def _looks_like_section_heading(line: str) -> bool:
+    """Return whether line likely starts a structured section."""
+
+    section, _ = _detect_section_and_remainder(line)
+    return bool(section)
+
+
+def _extract_inline_experiences(
+    lines: list[str],
+    source_locator: str | None,
+) -> list[ImportedExperienceDraft]:
+    """Extract experience-like entries from unsectioned lines."""
+
+    items: list[ImportedExperienceDraft] = []
+    seen: set[tuple[str, str]] = set()
+    for line in lines:
+        item = _parse_experience_line(line, source_locator)
+        if item is None:
+            continue
+
+        key = (item.title.lower(), item.company.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+
+    return items
 
 
 def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExperienceDraft | None:
     """Parse one experience line into structured fields."""
 
     match = _EXPERIENCE_PATTERN.match(line)
-    if match is None:
-        return None
+    if match is not None:
+        title = normalize_text(match.group("title"))
+        company = normalize_text(match.group("company"))
+        if title and company:
+            return ImportedExperienceDraft(
+                company=company,
+                title=title,
+                description=line,
+                source_locator=source_locator,
+            )
 
-    title = normalize_text(match.group("title"))
-    company = normalize_text(match.group("company"))
-    if not title or not company:
-        return None
+    lower_line = line.lower()
+    for separator in (" at ", " bei ", " @ "):
+        if separator not in lower_line:
+            continue
 
-    return ImportedExperienceDraft(
-        company=company,
-        title=title,
-        description=line,
-        source_locator=source_locator,
-    )
+        split_pattern = re.compile(re.escape(separator), re.IGNORECASE)
+        segments = split_pattern.split(line, maxsplit=1)
+        if len(segments) != 2:
+            continue
+
+        title = normalize_text(segments[0])
+        company = normalize_text(re.split(r"[.,;|]", segments[1], maxsplit=1)[0])
+        if not title or not company:
+            continue
+        if len(title) < 2 or len(company) < 2:
+            continue
+
+        return ImportedExperienceDraft(
+            company=company,
+            title=title,
+            description=line,
+            source_locator=source_locator,
+        )
+
+    return None
 
 
 def _parse_education_line(line: str, source_locator: str | None) -> ImportedEducationDraft | None:
@@ -407,13 +570,59 @@ def _parse_education_line(line: str, source_locator: str | None) -> ImportedEduc
 def _parse_skill_line(line: str, source_locator: str | None) -> list[ImportedSkillDraft]:
     """Parse one skills-section line into skill rows."""
 
+    cleaned_line = normalize_text(line)
+    if not cleaned_line:
+        return []
+
+    if _SKILLS_SPLIT_PATTERN.search(cleaned_line) is None:
+        return []
+
     skills: list[ImportedSkillDraft] = []
-    for token in _SKILLS_SPLIT_PATTERN.split(line):
+    for token in _SKILLS_SPLIT_PATTERN.split(cleaned_line):
         cleaned = normalize_text(token)
-        if len(cleaned) < 2:
+        if not _is_valid_skill_token(cleaned):
             continue
         skills.append(ImportedSkillDraft(skill_name=cleaned, source_locator=source_locator))
     return skills
+
+
+def _is_valid_skill_token(token: str) -> bool:
+    """Return whether parsed token is valid as skill value."""
+
+    if len(token) < 2 or len(token) > 64:
+        return False
+
+    lowered = token.lower()
+    if lowered in {
+        "home",
+        "projects",
+        "experience",
+        "skills",
+        "publications",
+        "blog",
+        "cv",
+        "linkedin",
+        "toggle menu",
+    }:
+        return False
+
+    if lowered.startswith("view "):
+        return False
+
+    if any(part in lowered for part in ("currently", "working", "selected", "follow", "portfolio")):
+        return False
+
+    if "." in token:
+        return False
+
+    word_count = len(token.split())
+    if word_count > 4:
+        return False
+
+    if word_count >= 3 and all(word[:1].isupper() for word in token.split() if word):
+        return False
+
+    return True
 
 
 def _deduplicate_skills(skills: list[ImportedSkillDraft]) -> list[ImportedSkillDraft]:

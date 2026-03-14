@@ -13,11 +13,17 @@ services:
       JOBKOI_SQLALCHEMY_ECHO: "false"
       JOBKOI_DOCUMENT_STORAGE_DIR: /var/lib/jobkoi/documents
       JOBKOI_IMPORT_STORAGE_DIR: /var/lib/jobkoi/imports
+      JOBKOI_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      JOBKOI_OLLAMA_MODEL: qwen2.5:3b
+      JOBKOI_OLLAMA_TIMEOUT_SECONDS: "120"
+      JOBKOI_OLLAMA_MAX_RETRIES: "1"
     ports:
       - "8000:8000"
     volumes:
       - ./storage/documents:/var/lib/jobkoi/documents
       - ./storage/imports:/var/lib/jobkoi/imports
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

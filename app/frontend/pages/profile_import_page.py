@@ -51,22 +51,43 @@ def register_profile_import_page(
             with ui.card().classes("w-full"):
                 ui.label("CV Import (PDF/DOCX)").classes("text-md font-semibold")
 
-                def on_upload(event: Any) -> None:
+                async def on_upload(event: Any) -> None:
                     """Capture uploaded file payload."""
 
-                    pending_upload["name"] = str(getattr(event, "name", "uploaded_cv"))
-                    pending_upload["content_type"] = str(
-                        getattr(event, "type", "application/octet-stream")
-                        or "application/octet-stream"
-                    )
-                    content = getattr(event, "content", None)
-                    if hasattr(content, "read"):
-                        pending_upload["bytes"] = content.read()
+                    file_object = getattr(event, "file", None)
+                    if file_object is not None and hasattr(file_object, "read"):
+                        pending_upload["name"] = str(getattr(file_object, "name", "uploaded_cv") or "uploaded_cv")
+                        pending_upload["content_type"] = str(
+                            getattr(file_object, "content_type", "application/octet-stream")
+                            or "application/octet-stream"
+                        )
+                        pending_upload["bytes"] = bytes(await file_object.read())
                     else:
-                        pending_upload["bytes"] = b""
-                    ui.notify(f"Loaded file: {pending_upload['name']}", color="info")
+                        pending_upload["name"] = str(getattr(event, "name", "uploaded_cv"))
+                        pending_upload["content_type"] = str(
+                            getattr(event, "type", "application/octet-stream")
+                            or "application/octet-stream"
+                        )
+                        pending_upload["bytes"] = _read_upload_bytes_legacy(getattr(event, "content", None))
 
-                ui.upload(on_upload=on_upload, auto_upload=True).props("accept=.pdf,.docx")
+                    if pending_upload["bytes"]:
+                        ui.notify(f"Loaded file: {pending_upload['name']}", color="info")
+                    else:
+                        ui.notify("Could not read uploaded file bytes.", color="negative")
+
+                def on_upload_rejected(_: Any) -> None:
+                    """Notify when browser upload constraints reject a file."""
+
+                    ui.notify(
+                        "Upload rejected. Use PDF/DOCX and keep size under 20 MB.",
+                        color="negative",
+                    )
+
+                ui.upload(
+                    on_upload=on_upload,
+                    on_rejected=on_upload_rejected,
+                    auto_upload=True,
+                ).props("accept=.pdf,.docx max-file-size=20971520")
 
                 async def import_cv_action() -> None:
                     """Submit CV import request."""
@@ -96,22 +117,20 @@ def register_profile_import_page(
 
             with ui.card().classes("w-full"):
                 ui.label("Portfolio Website Import").classes("text-md font-semibold")
-                ui.input(
+                url_input = ui.input(
                     "Public URL",
                     value=website_url["value"],
-                    on_change=lambda event: website_url.__setitem__("value", str(event.value)),
                 )
-                ui.number(
+                url_input.bind_value(website_url, "value")
+
+                max_pages_input = ui.number(
                     "Max same-domain pages",
                     value=website_max_pages["value"],
                     min=1,
                     max=10,
                     step=1,
-                    on_change=lambda event: website_max_pages.__setitem__(
-                        "value",
-                        int(float(event.value or 3)),
-                    ),
                 )
+                max_pages_input.bind_value(website_max_pages, "value")
 
                 async def import_website_action() -> None:
                     """Submit website import request."""
@@ -444,3 +463,44 @@ def _set_conflict_resolution_note(
 
     draft = import_state.conflict_resolutions.setdefault(conflict_id, ConflictResolutionDraft())
     draft.resolution_note = note or None
+
+
+
+def _read_upload_bytes_legacy(content: Any) -> bytes:
+    """Read upload bytes for legacy NiceGUI upload events.
+
+    Args:
+        content: Legacy upload content object.
+
+    Returns:
+        Raw uploaded bytes, or empty bytes when content cannot be read.
+    """
+
+    if content is None:
+        return b""
+
+    if isinstance(content, (bytes, bytearray)):
+        return bytes(content)
+
+    if hasattr(content, "read"):
+        try:
+            raw = content.read()
+        except Exception:
+            raw = None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        if isinstance(raw, str):
+            return raw.encode("utf-8", errors="ignore")
+
+    file_object = getattr(content, "file", None)
+    if hasattr(file_object, "read"):
+        try:
+            raw = file_object.read()
+        except Exception:
+            raw = None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        if isinstance(raw, str):
+            return raw.encode("utf-8", errors="ignore")
+
+    return b""
