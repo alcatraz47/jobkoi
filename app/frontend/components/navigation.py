@@ -17,6 +17,7 @@ def render_navigation() -> None:
         with ui.row().classes("gap-2"):
             ui.link("Dashboard", "/").classes("text-white")
             ui.link("Profile", "/profile").classes("text-white")
+            ui.link("Profile Import", "/profile-import").classes("text-white")
             ui.link("Job Intake", "/job-intake").classes("text-white")
             ui.link("Match Review", "/match-review").classes("text-white")
             ui.link("Output Review", "/output-review").classes("text-white")

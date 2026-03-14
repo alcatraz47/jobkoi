@@ -13,6 +13,7 @@ from app.api.routers.health import router as health_router
 from app.api.routers.job_analyses import router as job_analysis_router
 from app.api.routers.job_posts import router as job_post_router
 from app.api.routers.profile import router as profile_router
+from app.api.routers.profile_imports import router as profile_import_router
 from app.api.routers.tailoring import router as tailoring_router
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger, setup_logging
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(profile_router, prefix="/api/v1")
+    app.include_router(profile_import_router, prefix="/api/v1")
     app.include_router(job_post_router, prefix="/api/v1")
     app.include_router(job_analysis_router, prefix="/api/v1")
     app.include_router(tailoring_router, prefix="/api/v1")

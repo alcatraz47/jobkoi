@@ -52,6 +52,37 @@ class ApiClient:
 
         return self._request_json("POST", path, payload)
 
+    def post_multipart(
+        self,
+        path: str,
+        files: dict[str, tuple[str, bytes, str]],
+    ) -> dict[str, Any]:
+        """Execute a multipart POST request and parse JSON response.
+
+        Args:
+            path: Relative API path.
+            files: Multipart files mapping.
+
+        Returns:
+            Parsed JSON object.
+
+        Raises:
+            FrontendApiError: If request fails.
+        """
+
+        url = self.build_download_url(path)
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                response = client.post(url, files=files)
+        except httpx.HTTPError as exc:
+            raise FrontendApiError(f"Failed to contact backend API: {exc}") from exc
+
+        if response.status_code >= 400:
+            detail = _extract_error_detail(response)
+            raise FrontendApiError(f"API request failed ({response.status_code}): {detail}")
+
+        return _parse_object_json(response)
+
     def put_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute a PUT request with JSON payload.
 
@@ -151,14 +182,7 @@ class ApiClient:
             detail = _extract_error_detail(response)
             raise FrontendApiError(f"API request failed ({response.status_code}): {detail}")
 
-        try:
-            parsed = response.json()
-        except ValueError as exc:
-            raise FrontendApiError("Backend returned non-JSON response.") from exc
-
-        if not isinstance(parsed, dict):
-            raise FrontendApiError("Backend JSON response must be an object.")
-        return parsed
+        return _parse_object_json(response)
 
 
 def build_default_api_client() -> ApiClient:
@@ -172,6 +196,19 @@ def build_default_api_client() -> ApiClient:
     host = settings.app_host if settings.app_host != "0.0.0.0" else "127.0.0.1"
     base_url = f"http://{host}:{settings.app_port}/api/v1"
     return ApiClient(base_url=base_url)
+
+
+def _parse_object_json(response: httpx.Response) -> dict[str, Any]:
+    """Parse and validate JSON object payload from HTTP response."""
+
+    try:
+        parsed = response.json()
+    except ValueError as exc:
+        raise FrontendApiError("Backend returned non-JSON response.") from exc
+
+    if not isinstance(parsed, dict):
+        raise FrontendApiError("Backend JSON response must be an object.")
+    return parsed
 
 
 def _extract_error_detail(response: httpx.Response) -> str:

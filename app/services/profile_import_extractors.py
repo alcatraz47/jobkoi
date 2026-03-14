@@ -1,0 +1,394 @@
+"""Extraction adapters for CV and portfolio website profile imports."""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import re
+import zipfile
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urljoin, urlparse, urlunparse
+
+import httpx
+
+from app.domain.job_text import normalize_text
+
+
+class ProfileImportExtractionError(Exception):
+    """Raised when source extraction fails."""
+
+
+@dataclass(frozen=True)
+class ExtractedTextResult:
+    """Extraction result for one source payload."""
+
+    text: str
+    extractor_name: str
+    extractor_version: str | None = None
+
+
+@dataclass(frozen=True)
+class WebsitePageResult:
+    """Extracted text result for one crawled website page."""
+
+    url: str
+    text: str
+
+
+class CvImportExtractor:
+    """CV extractor preferring Docling with fallback-compatible parsing."""
+
+    def extract_from_file(
+        self,
+        *,
+        file_path: Path,
+        file_name: str,
+        content_type: str | None,
+    ) -> ExtractedTextResult:
+        """Extract normalized text from a CV file.
+
+        Args:
+            file_path: Stored source file path.
+            file_name: Original uploaded filename.
+            content_type: Uploaded content type.
+
+        Returns:
+            Extracted text payload.
+
+        Raises:
+            ProfileImportExtractionError: If extraction cannot parse the file.
+        """
+
+        docling_result = _extract_with_docling(file_path)
+        if docling_result is not None:
+            return docling_result
+
+        suffix = file_path.suffix.lower()
+        if suffix == ".docx":
+            text = _extract_docx_text(file_path)
+            return ExtractedTextResult(text=normalize_text(text), extractor_name="docx_fallback")
+
+        if suffix == ".pdf":
+            text = _extract_pdf_text(file_path)
+            return ExtractedTextResult(text=normalize_text(text), extractor_name="pdf_fallback")
+
+        if suffix in {".txt", ".md", ".rtf"}:
+            text = file_path.read_text(encoding="utf-8", errors="ignore")
+            return ExtractedTextResult(text=normalize_text(text), extractor_name="text_fallback")
+
+        if content_type and "word" in content_type:
+            text = _extract_docx_text(file_path)
+            return ExtractedTextResult(text=normalize_text(text), extractor_name="docx_fallback")
+
+        if content_type and "pdf" in content_type:
+            text = _extract_pdf_text(file_path)
+            return ExtractedTextResult(text=normalize_text(text), extractor_name="pdf_fallback")
+
+        raise ProfileImportExtractionError(
+            f"Unsupported CV format for file '{file_name}'. Only PDF and DOCX are supported."
+        )
+
+
+class WebsiteImportExtractor:
+    """Website extractor with same-domain crawling and Trafilatura preference."""
+
+    def __init__(
+        self,
+        *,
+        fetch_html: Callable[[str], str] | None = None,
+    ) -> None:
+        """Initialize website extractor.
+
+        Args:
+            fetch_html: Optional custom fetcher used for testing.
+        """
+
+        self._fetch_html = fetch_html or _fetch_html_default
+
+    def extract_from_url(self, *, url: str, max_pages: int) -> tuple[str, list[WebsitePageResult]]:
+        """Extract useful text from one URL and same-domain linked pages.
+
+        Args:
+            url: Root website URL.
+            max_pages: Maximum same-domain pages to crawl.
+
+        Returns:
+            Tuple of extractor name and extracted page payload list.
+
+        Raises:
+            ProfileImportExtractionError: If root page cannot be fetched or parsed.
+        """
+
+        normalized_url = _normalize_url(url)
+        if not normalized_url:
+            raise ProfileImportExtractionError("Invalid website URL.")
+
+        domain = urlparse(normalized_url).netloc
+        queue: list[str] = [normalized_url]
+        visited: set[str] = set()
+        pages: list[WebsitePageResult] = []
+
+        while queue and len(pages) < max_pages:
+            current_url = queue.pop(0)
+            if current_url in visited:
+                continue
+            visited.add(current_url)
+
+            html = self._fetch_html(current_url)
+            text = _extract_website_text(html=html, url=current_url)
+            if text:
+                pages.append(WebsitePageResult(url=current_url, text=normalize_text(text)))
+
+            for link in _extract_same_domain_links(html=html, base_url=current_url, domain=domain):
+                if link in visited or link in queue:
+                    continue
+                if len(queue) + len(pages) >= max_pages * 3:
+                    break
+                queue.append(link)
+
+        if not pages:
+            raise ProfileImportExtractionError("No readable text could be extracted from the website.")
+
+        extractor_name = "trafilatura" if _is_trafilatura_available() else "html_fallback"
+        return extractor_name, pages
+
+
+def compute_sha256_bytes(content: bytes) -> str:
+    """Return SHA256 checksum for input bytes.
+
+    Args:
+        content: Raw source bytes.
+
+    Returns:
+        SHA256 hex digest.
+    """
+
+    digest = hashlib.sha256()
+    digest.update(content)
+    return digest.hexdigest()
+
+
+def _extract_with_docling(file_path: Path) -> ExtractedTextResult | None:
+    """Try extracting text using Docling when available."""
+
+    try:
+        from docling.document_converter import DocumentConverter  # type: ignore[import-not-found]
+    except Exception:
+        return None
+
+    try:
+        converter = DocumentConverter()
+        result = converter.convert(str(file_path))
+
+        text = _docling_result_to_text(result)
+        normalized = normalize_text(text)
+        if not normalized:
+            return None
+        return ExtractedTextResult(
+            text=normalized,
+            extractor_name="docling",
+            extractor_version=None,
+        )
+    except Exception:
+        return None
+
+
+def _docling_result_to_text(result: object) -> str:
+    """Best-effort conversion of Docling conversion result to text."""
+
+    if result is None:
+        return ""
+
+    document = getattr(result, "document", None)
+    if document is None:
+        return str(result)
+
+    for method_name in (
+        "export_to_markdown",
+        "export_to_text",
+        "to_markdown",
+        "to_text",
+    ):
+        method = getattr(document, method_name, None)
+        if callable(method):
+            try:
+                value = method()
+                if isinstance(value, str) and value.strip():
+                    return value
+            except Exception:
+                continue
+
+    return str(document)
+
+
+def _extract_docx_text(file_path: Path) -> str:
+    """Extract plain text from DOCX file bytes."""
+
+    try:
+        with zipfile.ZipFile(file_path, "r") as archive:
+            xml_bytes = archive.read("word/document.xml")
+    except Exception as exc:
+        raise ProfileImportExtractionError("Failed to parse DOCX file.") from exc
+
+    text = _strip_xml_tags(xml_bytes.decode("utf-8", errors="ignore"))
+    return text
+
+
+def _extract_pdf_text(file_path: Path) -> str:
+    """Extract readable text from PDF bytes using fallback heuristics."""
+
+    data = file_path.read_bytes()
+    chunks = re.findall(rb"\(([^\)]{1,500})\)\s*Tj", data)
+
+    if chunks:
+        text_parts = [chunk.decode("latin-1", errors="ignore") for chunk in chunks]
+        return " ".join(text_parts)
+
+    printable = re.findall(rb"[A-Za-z0-9@._+\-/]{3,}", data)
+    text = " ".join(part.decode("latin-1", errors="ignore") for part in printable)
+    if not text.strip():
+        raise ProfileImportExtractionError("Failed to parse PDF file.")
+    return text
+
+
+def _strip_xml_tags(xml_text: str) -> str:
+    """Strip XML tags from text and compact whitespace."""
+
+    text = re.sub(r"<[^>]+>", " ", xml_text)
+    text = text.replace("&amp;", "&")
+    text = text.replace("&lt;", "<")
+    text = text.replace("&gt;", ">")
+    return normalize_text(text)
+
+
+def _fetch_html_default(url: str) -> str:
+    """Fetch one HTML page via HTTP."""
+
+    try:
+        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+            response = client.get(url)
+    except httpx.HTTPError as exc:
+        raise ProfileImportExtractionError(f"Failed to fetch URL: {url}") from exc
+
+    if response.status_code >= 400:
+        raise ProfileImportExtractionError(f"URL returned HTTP {response.status_code}: {url}")
+
+    return response.text
+
+
+def _is_trafilatura_available() -> bool:
+    """Return whether Trafilatura import is available."""
+
+    try:
+        import trafilatura  # type: ignore[import-not-found] # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _extract_website_text(*, html: str, url: str) -> str:
+    """Extract clean page text with Trafilatura fallback."""
+
+    try:
+        import trafilatura  # type: ignore[import-not-found]
+
+        extracted = trafilatura.extract(
+            html,
+            url=url,
+            include_links=False,
+            include_comments=False,
+            output_format="txt",
+        )
+        if isinstance(extracted, str) and extracted.strip():
+            return extracted
+    except Exception:
+        pass
+
+    parser = _HtmlTextParser()
+    parser.feed(html)
+    parser.close()
+    return normalize_text(" ".join(parser.parts))
+
+
+def _extract_same_domain_links(*, html: str, base_url: str, domain: str) -> list[str]:
+    """Extract unique same-domain links from HTML page."""
+
+    parser = _HtmlLinkParser()
+    parser.feed(html)
+    parser.close()
+
+    links: list[str] = []
+    seen: set[str] = set()
+    for href in parser.links:
+        absolute = _normalize_url(urljoin(base_url, href))
+        if not absolute:
+            continue
+        parsed = urlparse(absolute)
+        if parsed.netloc != domain:
+            continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        links.append(absolute)
+    return links
+
+
+def _normalize_url(url: str) -> str:
+    """Normalize and validate URL for crawling."""
+
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return ""
+    if not parsed.netloc:
+        return ""
+
+    normalized = parsed._replace(fragment="", query="")
+    return urlunparse(normalized)
+
+
+class _HtmlTextParser(HTMLParser):
+    """Simple HTML-to-text parser fallback."""
+
+    def __init__(self) -> None:
+        """Initialize parser state."""
+
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        """Append non-empty text segments."""
+
+        cleaned = normalize_text(data)
+        if cleaned:
+            self.parts.append(cleaned)
+
+
+class _HtmlLinkParser(HTMLParser):
+    """Simple anchor-link parser for same-domain crawling."""
+
+    def __init__(self) -> None:
+        """Initialize parser state."""
+
+        super().__init__()
+        self.links: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Capture link href values from anchor tags."""
+
+        if tag.lower() != "a":
+            return
+
+        href = ""
+        for key, value in attrs:
+            if key.lower() == "href" and value:
+                href = value
+                break
+
+        if not href:
+            return
+        if href.startswith("javascript:") or href.startswith("mailto:"):
+            return
+        self.links.append(href)

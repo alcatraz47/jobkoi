@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         database_url: SQLAlchemy database URL.
         sqlalchemy_echo: Enables SQL query echo logging when True.
         document_storage_dir: Local directory for generated document files.
+        import_storage_dir: Local directory for import source file storage.
     """
 
     model_config = SettingsConfigDict(
@@ -39,6 +40,7 @@ class Settings(BaseSettings):
     )
     sqlalchemy_echo: bool = Field(default=False)
     document_storage_dir: str = Field(default="storage/documents")
+    import_storage_dir: str = Field(default="storage/imports")
 
 
 @lru_cache(maxsize=1)
