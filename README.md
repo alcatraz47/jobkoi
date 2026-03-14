@@ -2,6 +2,8 @@
 
 Jobkoi is a Python 3.12 modular monolith for preparing ATS-friendly application packages from one canonical profile.
 
+Skill and experience profiling software with deterministic Python orchestration and optional local AI assistance.
+
 ## Bootstrap scope
 
 This repository currently includes:
@@ -9,8 +11,6 @@ This repository currently includes:
 - Typed settings with `pydantic-settings`
 - SQLAlchemy 2.0 engine and session providers
 - Health endpoint
-
-Business modules (profile, analysis, tailoring, documents) are intentionally not implemented yet.
 
 ## Quick start
 
