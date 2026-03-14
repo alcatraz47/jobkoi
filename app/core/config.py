@@ -21,6 +21,10 @@ class Settings(BaseSettings):
         sqlalchemy_echo: Enables SQL query echo logging when True.
         document_storage_dir: Local directory for generated document files.
         import_storage_dir: Local directory for import source file storage.
+        ollama_base_url: Base URL for local/remote Ollama server.
+        ollama_model: Ollama model name used by LLM helpers.
+        ollama_timeout_seconds: Timeout for Ollama HTTP calls.
+        ollama_max_retries: Retry count after initial Ollama call.
     """
 
     model_config = SettingsConfigDict(
@@ -41,6 +45,10 @@ class Settings(BaseSettings):
     sqlalchemy_echo: bool = Field(default=False)
     document_storage_dir: str = Field(default="storage/documents")
     import_storage_dir: str = Field(default="storage/imports")
+    ollama_base_url: str = Field(default="http://127.0.0.1:11434")
+    ollama_model: str = Field(default="qwen2.5:3b")
+    ollama_timeout_seconds: float = Field(default=30.0)
+    ollama_max_retries: int = Field(default=1, ge=0)
 
 
 @lru_cache(maxsize=1)
