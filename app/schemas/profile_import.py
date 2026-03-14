@@ -139,3 +139,11 @@ class ProfileImportApplyResponse(BaseModel):
 
     run: ProfileImportRunResponse
     profile: MasterProfileResponse
+
+
+class ProfileImportDeleteResponse(BaseModel):
+    """Response payload for deleting one profile import run."""
+
+    deleted: bool
+    run_id: str
+

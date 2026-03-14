@@ -63,3 +63,31 @@ def test_must_have_hits_and_relevance_scoring_are_deterministic() -> None:
     assert hits == 1
     assert 0 <= score <= 100
     assert score == compute_relevance_score(skill_score=1.0, keyword_score=0.5, must_have_hits=hits)
+
+
+def test_matching_handles_alias_terms_for_portal_requirements() -> None:
+    """Matching should align common abbreviation/full-form skill variants."""
+
+    requirements = [
+        JobRequirementData(
+            id="req-1",
+            text="Natural Language Processing and Large Language Models experience",
+            requirement_type="skill",
+            is_must_have=True,
+            priority_score=90,
+        ),
+        JobRequirementData(
+            id="req-2",
+            text="Experience with CI/CD and MLOps pipelines",
+            requirement_type="skill",
+            is_must_have=True,
+            priority_score=85,
+        ),
+    ]
+    keywords = build_requirement_keyword_set(requirements)
+
+    assert skill_match_score("NLP", keywords) > 0.0
+    assert skill_match_score("LLM", keywords) > 0.0
+    assert skill_match_score("CI/CD", keywords) > 0.0
+    assert keyword_match_score("Built MLOps platform", keywords) > 0.0
+

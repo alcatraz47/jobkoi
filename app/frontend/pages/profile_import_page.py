@@ -160,12 +160,16 @@ def register_profile_import_page(
 
                 ui.button("Start Website Import", on_click=import_website_action)
 
-            _render_run_list(import_state=import_state)
+            _render_run_list(import_state=import_state, profile_import_api=profile_import_api)
             _render_selected_run_review(import_state=import_state, profile_import_api=profile_import_api)
 
 
-def _render_run_list(*, import_state: ProfileImportState) -> None:
-    """Render import run list panel."""
+def _render_run_list(
+    *,
+    import_state: ProfileImportState,
+    profile_import_api: ProfileImportApi,
+) -> None:
+    """Render import run list panel with retract and delete actions."""
 
     with ui.card().classes("w-full"):
         ui.label("Import Runs").classes("text-md font-semibold")
@@ -175,14 +179,55 @@ def _render_run_list(*, import_state: ProfileImportState) -> None:
 
         for item in import_state.runs:
             run_id = str(item.get("id", ""))
+            if not run_id:
+                continue
+
             source = item.get("source") if isinstance(item.get("source"), dict) else {}
             label = str(source.get("source_label", "-"))
             status = str(item.get("status", "-"))
             created_at = str(item.get("created_at", ""))
 
+            async def retract_action(target_run_id: str = run_id) -> None:
+                """Mark one run as rejected (retracted) from list view."""
+
+                try:
+                    run_payload = await run.io_bound(
+                        lambda: profile_import_api.reject_run(target_run_id, "Retracted from import run list.")
+                    )
+                except FrontendApiError as exc:
+                    ui.notify(str(exc), color="negative")
+                    return
+
+                import_state.load_selected_run(run_payload)
+                await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+                ui.notify("Import run retracted.", color="warning")
+                ui.navigate.to(f"/profile-import?run_id={target_run_id}")
+
+            async def delete_action(target_run_id: str = run_id) -> None:
+                """Delete one import run from backend and list view."""
+
+                try:
+                    await run.io_bound(lambda: profile_import_api.delete_run(target_run_id))
+                except FrontendApiError as exc:
+                    ui.notify(str(exc), color="negative")
+                    return
+
+                if import_state.selected_run and str(import_state.selected_run.get("id")) == target_run_id:
+                    import_state.selected_run = None
+                    import_state.field_decisions = {}
+                    import_state.conflict_resolutions = {}
+
+                await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+                ui.notify("Import run deleted.", color="warning")
+                ui.navigate.to("/profile-import")
+
             with ui.row().classes("w-full items-center justify-between border-b py-2"):
                 ui.label(f"{label} • {status} • {created_at[:19].replace('T', ' ')}").classes("text-sm")
-                ui.link("Open", target=f"/profile-import?run_id={run_id}")
+                with ui.row().classes("items-center gap-2"):
+                    ui.link("Open", target=f"/profile-import?run_id={run_id}")
+                    if status not in {"rejected"}:
+                        ui.button("Retract", on_click=retract_action).props("flat color=warning")
+                    ui.button("Delete", on_click=delete_action).props("flat color=negative")
 
 
 def _render_selected_run_review(
@@ -224,6 +269,24 @@ def _render_selected_run_review(
         if not conflicts:
             ui.label("No conflicts detected.").classes("text-sm text-slate-600")
         else:
+            with ui.row().classes("gap-2 pb-2"):
+                ui.button(
+                    "Resolve All: Keep Existing",
+                    on_click=lambda: _set_all_conflict_resolutions(
+                        import_state=import_state,
+                        conflicts=conflicts,
+                        resolution_status="keep_existing",
+                    ),
+                ).props("outline size=sm")
+                ui.button(
+                    "Resolve All: Accept Imported",
+                    on_click=lambda: _set_all_conflict_resolutions(
+                        import_state=import_state,
+                        conflicts=conflicts,
+                        resolution_status="accept_import",
+                    ),
+                ).props("outline size=sm")
+
             for conflict in conflicts:
                 _render_conflict_resolution_row(import_state=import_state, conflict=conflict)
 
@@ -236,25 +299,7 @@ def _render_selected_run_review(
             if not selected_id:
                 return
 
-            payload = {
-                "decisions": [
-                    {
-                        "field_id": field_id,
-                        "decision": decision.decision,
-                        "edited_value": decision.edited_value,
-                        "reviewer_note": decision.reviewer_note,
-                    }
-                    for field_id, decision in import_state.field_decisions.items()
-                ],
-                "conflict_resolutions": [
-                    {
-                        "conflict_id": conflict_id,
-                        "resolution_status": resolution.resolution_status,
-                        "resolution_note": resolution.resolution_note,
-                    }
-                    for conflict_id, resolution in import_state.conflict_resolutions.items()
-                ],
-            }
+            payload = _build_review_payload(import_state)
 
             try:
                 run_payload = await run.io_bound(
@@ -278,9 +323,31 @@ def _render_selected_run_review(
             if not selected_id:
                 return
 
+            review_payload = _build_review_payload(import_state)
+            try:
+                reviewed_run = await run.io_bound(
+                    lambda: profile_import_api.review_run(selected_id, review_payload)
+                )
+            except FrontendApiError as exc:
+                ui.notify(str(exc), color="negative")
+                return
+
+            import_state.load_selected_run(reviewed_run)
+
             try:
                 response = await run.io_bound(lambda: profile_import_api.apply_run(selected_id))
             except FrontendApiError as exc:
+                pending_count = _count_pending_conflicts(import_state.selected_run)
+                if pending_count > 0:
+                    ui.notify(
+                        (
+                            f"Resolve {pending_count} pending conflict(s) first. "
+                            "Choose Keep Existing or Accept Imported, then Apply."
+                        ),
+                        color="warning",
+                    )
+                    return
+
                 ui.notify(str(exc), color="negative")
                 return
 
@@ -414,6 +481,93 @@ def _render_conflict_resolution_row(*, import_state: ProfileImportState, conflic
                 str(event.value),
             ),
         )
+
+
+def _build_review_payload(import_state: ProfileImportState) -> dict[str, list[dict[str, Any]]]:
+    """Build review payload from current import-state drafts.
+
+    Args:
+        import_state: Mutable import review state.
+
+    Returns:
+        Serialized review payload.
+    """
+
+    return {
+        "decisions": [
+            {
+                "field_id": field_id,
+                "decision": decision.decision,
+                "edited_value": decision.edited_value,
+                "reviewer_note": decision.reviewer_note,
+            }
+            for field_id, decision in import_state.field_decisions.items()
+        ],
+        "conflict_resolutions": [
+            {
+                "conflict_id": conflict_id,
+                "resolution_status": resolution.resolution_status,
+                "resolution_note": resolution.resolution_note,
+            }
+            for conflict_id, resolution in import_state.conflict_resolutions.items()
+        ],
+    }
+
+
+def _set_all_conflict_resolutions(
+    *,
+    import_state: ProfileImportState,
+    conflicts: list[dict[str, Any]],
+    resolution_status: str,
+) -> None:
+    """Set one resolution status for all visible conflict rows.
+
+    Args:
+        import_state: Mutable import review state.
+        conflicts: Conflict row payloads.
+        resolution_status: Resolution status to assign.
+
+    Returns:
+        None.
+    """
+
+    count = 0
+    for conflict in conflicts:
+        conflict_id = str(conflict.get("id", ""))
+        if not conflict_id:
+            continue
+
+        draft = import_state.conflict_resolutions.setdefault(conflict_id, ConflictResolutionDraft())
+        draft.resolution_status = resolution_status
+        count += 1
+
+    if count > 0:
+        ui.notify(
+            f"Set {count} conflict(s) to {resolution_status}. Click Save or Apply.",
+            color="info",
+        )
+
+
+def _count_pending_conflicts(run_payload: dict[str, Any] | None) -> int:
+    """Count conflicts still marked as pending.
+
+    Args:
+        run_payload: Selected run payload.
+
+    Returns:
+        Number of pending conflict rows.
+    """
+
+    if not isinstance(run_payload, dict):
+        return 0
+
+    count = 0
+    for conflict in run_payload.get("conflicts", []):
+        if not isinstance(conflict, dict):
+            continue
+        if str(conflict.get("resolution_status", "pending")) == "pending":
+            count += 1
+    return count
 
 
 async def _load_runs(*, import_state: ProfileImportState, profile_import_api: ProfileImportApi) -> None:

@@ -15,6 +15,7 @@ class ImportedExperienceDraft:
     end_date: str | None = None
     description: str | None = None
     source_locator: str | None = None
+    source_excerpt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class ImportedEducationDraft:
     start_date: str | None = None
     end_date: str | None = None
     source_locator: str | None = None
+    source_excerpt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ class ImportedSkillDraft:
     level: str | None = None
     category: str | None = None
     source_locator: str | None = None
+    source_excerpt: str | None = None
 
 
 @dataclass(frozen=True)

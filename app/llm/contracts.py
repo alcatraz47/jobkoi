@@ -39,6 +39,108 @@ class RequirementExtractionResponse(StrictContractModel):
     requirements: list[RequirementExtractionItem] = Field(default_factory=list)
 
 
+class ProfileImportScalarField(StrictContractModel):
+    """Scalar profile field extracted from import text.
+
+    Attributes:
+        value: Extracted scalar value.
+        source_excerpt: Optional evidence snippet from source text.
+        source_locator: Optional source locator such as page label.
+    """
+
+    value: str
+    source_excerpt: str | None = None
+    source_locator: str | None = None
+
+
+class ProfileImportExperienceItem(StrictContractModel):
+    """Structured imported experience item.
+
+    Attributes:
+        company: Employer/company name.
+        title: Role title.
+        start_date: Optional start date string.
+        end_date: Optional end date string.
+        description: Optional role description.
+        source_excerpt: Optional evidence snippet from source text.
+        source_locator: Optional source locator such as page label.
+    """
+
+    company: str | None = None
+    title: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    description: str | None = None
+    source_excerpt: str | None = None
+    source_locator: str | None = None
+
+
+class ProfileImportEducationItem(StrictContractModel):
+    """Structured imported education item.
+
+    Attributes:
+        institution: Education institution name.
+        degree: Degree title.
+        field_of_study: Optional field of study.
+        start_date: Optional start date string.
+        end_date: Optional end date string.
+        source_excerpt: Optional evidence snippet from source text.
+        source_locator: Optional source locator such as page label.
+    """
+
+    institution: str | None = None
+    degree: str | None = None
+    field_of_study: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    source_excerpt: str | None = None
+    source_locator: str | None = None
+
+
+class ProfileImportSkillItem(StrictContractModel):
+    """Structured imported skill item.
+
+    Attributes:
+        skill_name: Skill label.
+        level: Optional skill level.
+        category: Optional skill category.
+        source_excerpt: Optional evidence snippet from source text.
+        source_locator: Optional source locator such as page label.
+    """
+
+    skill_name: str
+    level: str | None = None
+    category: str | None = None
+    source_excerpt: str | None = None
+    source_locator: str | None = None
+
+
+class ProfileImportExtractionResponse(StrictContractModel):
+    """Structured imported profile extraction response.
+
+    Attributes:
+        full_name: Extracted full name field when supported.
+        email: Extracted email field when supported.
+        phone: Extracted phone field when supported.
+        location: Extracted location field when supported.
+        headline: Extracted headline field when supported.
+        summary: Extracted summary field when supported.
+        experiences: Extracted experience rows.
+        educations: Extracted education rows.
+        skills: Extracted skill rows.
+    """
+
+    full_name: ProfileImportScalarField | None = None
+    email: ProfileImportScalarField | None = None
+    phone: ProfileImportScalarField | None = None
+    location: ProfileImportScalarField | None = None
+    headline: ProfileImportScalarField | None = None
+    summary: ProfileImportScalarField | None = None
+    experiences: list[ProfileImportExperienceItem] = Field(default_factory=list)
+    educations: list[ProfileImportEducationItem] = Field(default_factory=list)
+    skills: list[ProfileImportSkillItem] = Field(default_factory=list)
+
+
 class CvRewriteResponse(StrictContractModel):
     """Structured response for CV summary and bullet rewrites.
 

@@ -199,3 +199,133 @@ def test_website_import_blocks_apply_when_conflicts_are_unresolved(
     apply_response = client.post(f"/api/v1/profile-imports/{run_id}/apply")
     assert apply_response.status_code == 200
     assert apply_response.json()["profile"]["active_version"]["version_number"] == 2
+
+
+def test_cv_import_apply_returns_422_for_oversized_experience_fields(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """API should return 422 when reviewed values violate profile schema constraints."""
+
+    monkeypatch.setattr(
+        profile_import_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(import_storage_dir=str(tmp_path / "imports")),
+    )
+
+    def fake_extract(
+        self,
+        *,
+        file_path,
+        file_name: str,
+        content_type: str | None,
+    ) -> ExtractedTextResult:
+        _ = (self, file_path, file_name, content_type)
+        return ExtractedTextResult(
+            text=(
+                "Arfan Example\n"
+                "Backend Engineer\n"
+                "arfan@example.com\n"
+                "Experience\n"
+                "Software Engineer at Example GmbH\n"
+                "Skills\n"
+                "Python, FastAPI"
+            ),
+            extractor_name="fake_cv",
+        )
+
+    monkeypatch.setattr(
+        "app.services.profile_import_extractors.CvImportExtractor.extract_from_file",
+        fake_extract,
+    )
+
+    import_response = client.post(
+        "/api/v1/profile-imports/cv",
+        files={
+            "file": (
+                "resume.pdf",
+                b"fake-pdf-bytes",
+                "application/pdf",
+            )
+        },
+    )
+    assert import_response.status_code == 201
+
+    run = import_response.json()
+    run_id = run["id"]
+    headline_field = next(item for item in run["fields"] if item["field_path"] == "headline")
+    decisions = [
+        (
+            {"field_id": item["id"], "decision": "edit", "edited_value": "A" * 300}
+            if item["id"] == headline_field["id"]
+            else {"field_id": item["id"], "decision": "approve"}
+        )
+        for item in run["fields"]
+    ]
+    review_response = client.post(
+        f"/api/v1/profile-imports/{run_id}/review",
+        json={"decisions": decisions, "conflict_resolutions": []},
+    )
+    assert review_response.status_code == 200
+
+    apply_response = client.post(f"/api/v1/profile-imports/{run_id}/apply")
+    assert apply_response.status_code == 422
+    assert "Import apply validation failed" in apply_response.json()["detail"]
+
+
+def test_profile_import_run_delete_endpoint_removes_run(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Delete endpoint should remove one import run and make it inaccessible."""
+
+    monkeypatch.setattr(
+        profile_import_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(import_storage_dir=str(tmp_path / "imports")),
+    )
+
+    def fake_extract(
+        self,
+        *,
+        file_path,
+        file_name: str,
+        content_type: str | None,
+    ) -> ExtractedTextResult:
+        _ = (self, file_path, file_name, content_type)
+        return ExtractedTextResult(
+            text=(
+                "Arfan Example\n"
+                "Backend Engineer\n"
+                "arfan@example.com\n"
+                "Experience\n"
+                "Software Engineer at Example GmbH\n"
+                "Skills\n"
+                "Python"
+            ),
+            extractor_name="fake_cv",
+        )
+
+    monkeypatch.setattr(
+        "app.services.profile_import_extractors.CvImportExtractor.extract_from_file",
+        fake_extract,
+    )
+
+    import_response = client.post(
+        "/api/v1/profile-imports/cv",
+        files={"file": ("resume.pdf", b"fake-pdf-bytes", "application/pdf")},
+    )
+    assert import_response.status_code == 201
+
+    run_id = import_response.json()["id"]
+    delete_response = client.delete(f"/api/v1/profile-imports/{run_id}")
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"deleted": True, "run_id": run_id}
+
+    get_response = client.get(f"/api/v1/profile-imports/{run_id}")
+    assert get_response.status_code == 404
+
+    assert not list((tmp_path / "imports" / "cv").glob("*"))
+
