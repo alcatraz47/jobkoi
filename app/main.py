@@ -18,6 +18,11 @@ from app.core.config import Settings, get_settings
 from app.core.logging import get_logger, setup_logging
 from app.db.session import dispose_engine
 
+try:
+    from app.frontend.ui import register_frontend
+except Exception:  # pragma: no cover - optional frontend import guard
+    register_frontend = None
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -57,6 +62,10 @@ def create_app() -> FastAPI:
     app.include_router(tailoring_router, prefix="/api/v1")
     app.include_router(documents_router, prefix="/api/v1")
     app.include_router(application_packages_router, prefix="/api/v1")
+
+    if register_frontend is not None:
+        register_frontend(app)
+
     return app
 
 

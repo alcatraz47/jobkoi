@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     app_port: int = Field(default=8000)
     app_log_level: str = Field(default="INFO")
     database_url: str = Field(
-        default="postgresql+psycopg://postgres:postgres@localhost:5432/jobkoi"
+        default="postgresql+psycopg://jobkoi:jobkoi@localhost:5432/jobkoi"
     )
     sqlalchemy_echo: bool = Field(default=False)
     document_storage_dir: str = Field(default="storage/documents")
