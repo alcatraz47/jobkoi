@@ -1,0 +1,949 @@
+"""Service for CV and portfolio website profile import workflows."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+from app.db.models.profile_import import ProfileImportRunModel
+from app.db.repositories.profile_import_repository import (
+    AppliedFactPayload,
+    ConflictResolutionPayload,
+    FieldDecisionPayload,
+    ImportConflictPayload,
+    ImportFieldPayload,
+    ImportRunPayload,
+    ImportSourcePayload,
+    ProfileImportRepository,
+)
+from app.domain.profile_import_builders import (
+    build_imported_profile_from_text,
+    detect_import_language,
+    flatten_imported_profile_to_fields,
+)
+from app.domain.profile_import_conflicts import detect_import_conflicts
+from app.domain.profile_import_types import ImportedProfileDraft
+from app.schemas.profile import (
+    EducationInput,
+    ExperienceInput,
+    MasterProfileCreateRequest,
+    MasterProfileResponse,
+    MasterProfileUpdateRequest,
+    SkillInput,
+)
+from app.schemas.profile_import import (
+    ConflictResolutionInput,
+    FieldDecisionInput,
+    ProfileImportApplyResponse,
+    ProfileImportAppliedFactResponse,
+    ProfileImportConflictResponse,
+    ProfileImportDecisionResponse,
+    ProfileImportFieldResponse,
+    ProfileImportRejectRequest,
+    ProfileImportReviewRequest,
+    ProfileImportRunListResponse,
+    ProfileImportRunResponse,
+    ProfileImportSourceResponse,
+    WebsiteImportRequest,
+)
+from app.services.profile_import_extractors import (
+    CvImportExtractor,
+    ProfileImportExtractionError,
+    WebsiteImportExtractor,
+    compute_sha256_bytes,
+)
+from app.services.profile_service import ProfileNotFoundError, ProfileService
+
+
+_INDEXED_PATH_PATTERN = re.compile(r"^(?P<section>[a-z_]+)\[(?P<index>\d+)]\.(?P<field>[a-z_]+)$")
+
+
+class ProfileImportRunNotFoundError(Exception):
+    """Raised when a requested profile import run does not exist."""
+
+
+class ProfileImportValidationError(Exception):
+    """Raised when import review or apply validation fails."""
+
+
+class ProfileImportService:
+    """Service coordinating profile import ingestion, review, and apply flow."""
+
+    def __init__(
+        self,
+        session: Session,
+        *,
+        cv_extractor: CvImportExtractor | None = None,
+        website_extractor: WebsiteImportExtractor | None = None,
+        import_storage_dir: Path | None = None,
+    ) -> None:
+        """Initialize profile import service.
+
+        Args:
+            session: Active database session.
+            cv_extractor: Optional CV extraction adapter.
+            website_extractor: Optional website extraction adapter.
+            import_storage_dir: Optional local storage directory for source files.
+        """
+
+        self._session = session
+        self._repository = ProfileImportRepository(session)
+        self._profile_service = ProfileService(session)
+        self._cv_extractor = cv_extractor or CvImportExtractor()
+        self._website_extractor = website_extractor or WebsiteImportExtractor()
+        if import_storage_dir is None:
+            settings = get_settings()
+            import_storage_dir = Path(
+                getattr(settings, "import_storage_dir", "storage/imports")
+            )
+        self._import_storage_dir = import_storage_dir
+
+    def import_cv(
+        self,
+        *,
+        file_name: str,
+        content_type: str | None,
+        file_bytes: bytes,
+    ) -> ProfileImportRunResponse:
+        """Create a CV-based import run from uploaded file bytes.
+
+        Args:
+            file_name: Original uploaded file name.
+            content_type: Uploaded content type.
+            file_bytes: Uploaded file bytes.
+
+        Returns:
+            Created import run response.
+
+        Raises:
+            ProfileImportValidationError: If file extension is unsupported.
+            ProfileImportExtractionError: If source text extraction fails.
+        """
+
+        self._validate_cv_file_name(file_name)
+        source_path = self._persist_source_file(file_name=file_name, file_bytes=file_bytes)
+        checksum = compute_sha256_bytes(file_bytes)
+
+        source = self._repository.create_source(
+            ImportSourcePayload(
+                source_type="cv_document",
+                source_label=file_name,
+                file_name=file_name,
+                file_path=str(source_path),
+                source_url=None,
+                checksum_sha256=checksum,
+            )
+        )
+
+        extracted = self._cv_extractor.extract_from_file(
+            file_path=source_path,
+            file_name=file_name,
+            content_type=content_type,
+        )
+
+        run_payload = self._build_run_payload_from_text(
+            raw_text=extracted.text,
+            extractor_name=extracted.extractor_name,
+            extractor_version=extracted.extractor_version,
+            source_locator=file_name,
+        )
+        run = self._repository.create_run(source.id, run_payload)
+        self._session.commit()
+        return self._to_run_response(run)
+
+    def import_website(self, request: WebsiteImportRequest) -> ProfileImportRunResponse:
+        """Create a website-based import run from public URL extraction.
+
+        Args:
+            request: Website import request payload.
+
+        Returns:
+            Created import run response.
+
+        Raises:
+            ProfileImportExtractionError: If website content cannot be extracted.
+        """
+
+        source = self._repository.create_source(
+            ImportSourcePayload(
+                source_type="portfolio_website",
+                source_label=request.url,
+                file_name=None,
+                file_path=None,
+                source_url=request.url,
+                checksum_sha256=None,
+            )
+        )
+
+        extractor_name, pages = self._website_extractor.extract_from_url(
+            url=request.url,
+            max_pages=request.max_pages,
+        )
+
+        merged = ImportedProfileDraft()
+        combined_text_parts: list[str] = []
+        for page in pages:
+            page_draft = build_imported_profile_from_text(
+                text=page.text,
+                source_locator=page.url,
+            )
+            merged = _merge_imported_profile_drafts(base=merged, incoming=page_draft)
+            combined_text_parts.append(page.text)
+
+        merged_text = "\n".join(combined_text_parts)
+        run_payload = self._build_run_payload_from_draft(
+            draft=merged,
+            raw_text=merged_text,
+            extractor_name=extractor_name,
+            extractor_version=None,
+        )
+        run = self._repository.create_run(source.id, run_payload)
+        self._session.commit()
+        return self._to_run_response(run)
+
+    def list_runs(self) -> ProfileImportRunListResponse:
+        """List profile import runs.
+
+        Returns:
+            Import run list response.
+        """
+
+        runs = [self._to_run_response(item) for item in self._repository.list_runs(limit=100)]
+        return ProfileImportRunListResponse(runs=runs)
+
+    def get_run(self, run_id: str) -> ProfileImportRunResponse:
+        """Fetch one profile import run.
+
+        Args:
+            run_id: Import run identifier.
+
+        Returns:
+            Import run response.
+
+        Raises:
+            ProfileImportRunNotFoundError: If run does not exist.
+        """
+
+        run = self._require_run(run_id)
+        return self._to_run_response(run)
+
+    def review_run(self, run_id: str, request: ProfileImportReviewRequest) -> ProfileImportRunResponse:
+        """Apply review decisions and conflict resolutions for one import run.
+
+        Args:
+            run_id: Import run identifier.
+            request: Review update payload.
+
+        Returns:
+            Updated import run response.
+
+        Raises:
+            ProfileImportRunNotFoundError: If run does not exist.
+            ProfileImportValidationError: If decision payload is invalid.
+        """
+
+        run = self._require_run(run_id)
+
+        decision_payloads = [self._to_decision_payload(item) for item in request.decisions]
+        resolution_payloads = [self._to_resolution_payload(item) for item in request.conflict_resolutions]
+
+        self._repository.update_field_decisions(run=run, decisions=decision_payloads)
+        self._repository.update_conflict_resolutions(run=run, resolutions=resolution_payloads)
+
+        if request.decisions or request.conflict_resolutions:
+            self._repository.set_run_status(run, "reviewed")
+
+        self._session.commit()
+        return self.get_run(run_id)
+
+    def reject_run(self, run_id: str, request: ProfileImportRejectRequest) -> ProfileImportRunResponse:
+        """Reject an import run without applying any extracted fields.
+
+        Args:
+            run_id: Import run identifier.
+            request: Reject payload.
+
+        Returns:
+            Updated import run response.
+
+        Raises:
+            ProfileImportRunNotFoundError: If run does not exist.
+        """
+
+        _ = request
+        run = self._require_run(run_id)
+        self._repository.set_run_status(run, "rejected")
+        self._session.commit()
+        return self.get_run(run_id)
+
+    def apply_run(self, run_id: str) -> ProfileImportApplyResponse:
+        """Apply approved/edited import fields into master profile via new version.
+
+        Args:
+            run_id: Import run identifier.
+
+        Returns:
+            Apply response with updated run and profile.
+
+        Raises:
+            ProfileImportRunNotFoundError: If run does not exist.
+            ProfileImportValidationError: If unresolved conflicts or required fields are missing.
+        """
+
+        run = self._require_run(run_id)
+        if run.status in {"rejected", "failed"}:
+            raise ProfileImportValidationError("Rejected or failed import runs cannot be applied.")
+
+        self._ensure_conflicts_are_resolved(run)
+
+        selected_fields = [
+            field
+            for field in run.fields
+            if field.decision_status in {"approved", "edited"}
+            and field.suggested_value
+        ]
+        if not selected_fields:
+            raise ProfileImportValidationError("No approved fields are available to apply.")
+
+        existing_profile = self._try_get_profile_payload()
+        payload = _build_profile_apply_payload(existing_profile)
+        applied_field_paths: list[tuple[str, str]] = []
+
+        _apply_scalar_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
+        _apply_experience_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
+        _apply_education_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
+        _apply_skill_fields(payload=payload, fields=selected_fields, applied_field_paths=applied_field_paths)
+
+        if not payload["full_name"] or not payload["email"]:
+            raise ProfileImportValidationError(
+                "Applying import requires full_name and email after review decisions."
+            )
+
+        profile_response = self._save_profile_payload(existing_profile, payload)
+
+        trace_rows = [
+            AppliedFactPayload(
+                field_id=field.id,
+                target_entity_type="profile_version",
+                target_entity_id=profile_response.active_version.version_id,
+                target_field_path=field_path,
+                applied_value=applied_value,
+            )
+            for field_path, applied_value in applied_field_paths
+            for field in selected_fields
+            if field.field_path == field_path and field.suggested_value == applied_value
+        ]
+
+        self._repository.add_applied_facts(run_id=run.id, rows=trace_rows)
+        self._repository.set_run_status(run, "applied")
+        self._session.commit()
+        self._session.expire_all()
+
+        return ProfileImportApplyResponse(
+            run=self.get_run(run_id),
+            profile=profile_response,
+        )
+
+    def _build_run_payload_from_text(
+        self,
+        *,
+        raw_text: str,
+        extractor_name: str,
+        extractor_version: str | None,
+        source_locator: str,
+    ) -> ImportRunPayload:
+        """Build repository run payload from raw text."""
+
+        draft = build_imported_profile_from_text(text=raw_text, source_locator=source_locator)
+        return self._build_run_payload_from_draft(
+            draft=draft,
+            raw_text=raw_text,
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+        )
+
+    def _build_run_payload_from_draft(
+        self,
+        *,
+        draft: ImportedProfileDraft,
+        raw_text: str,
+        extractor_name: str,
+        extractor_version: str | None,
+    ) -> ImportRunPayload:
+        """Build repository run payload from imported profile draft."""
+
+        field_rows = flatten_imported_profile_to_fields(draft)
+        existing_profile = self._try_get_profile_payload()
+        conflicts = detect_import_conflicts(
+            existing_profile_payload=existing_profile,
+            imported_draft=draft,
+        )
+
+        return ImportRunPayload(
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            status="extracted",
+            detected_language=detect_import_language(raw_text),
+            raw_text=raw_text,
+            structured_payload_json=json.dumps(_draft_to_dict(draft), ensure_ascii=True),
+            fields=[
+                ImportFieldPayload(
+                    field_path=item.field_path,
+                    section_type=item.section_type,
+                    source_locator=item.source_locator,
+                    source_excerpt=item.source_excerpt,
+                    extracted_value=item.extracted_value,
+                    suggested_value=item.suggested_value,
+                    confidence_score=item.confidence_score,
+                    sort_order=item.sort_order,
+                )
+                for item in field_rows
+            ],
+            conflicts=[
+                ImportConflictPayload(
+                    field_path=item.field_path,
+                    conflict_type=item.conflict_type,
+                    existing_value=item.existing_value,
+                    imported_value=item.imported_value,
+                )
+                for item in conflicts
+            ],
+        )
+
+    def _require_run(self, run_id: str) -> ProfileImportRunModel:
+        """Load import run or raise not-found error."""
+
+        run = self._repository.get_run(run_id)
+        if run is None:
+            raise ProfileImportRunNotFoundError("Profile import run not found.")
+        return run
+
+    def _try_get_profile_payload(self) -> dict[str, object] | None:
+        """Return existing profile payload when available."""
+
+        try:
+            profile = self._profile_service.get_profile()
+        except ProfileNotFoundError:
+            return None
+        return profile.model_dump(mode="json")
+
+    def _save_profile_payload(
+        self,
+        existing_profile_payload: dict[str, object] | None,
+        payload: dict[str, Any],
+    ) -> MasterProfileResponse:
+        """Persist merged payload as create or versioned update."""
+
+        if existing_profile_payload is None:
+            request = MasterProfileCreateRequest.model_validate(payload)
+            return self._profile_service.create_profile(request)
+
+        request = MasterProfileUpdateRequest.model_validate(payload)
+        return self._profile_service.update_profile(request)
+
+    def _ensure_conflicts_are_resolved(self, run: ProfileImportRunModel) -> None:
+        """Ensure no unresolved conflict rows remain before apply."""
+
+        pending = [item for item in run.conflicts if item.resolution_status == "pending"]
+        if pending:
+            raise ProfileImportValidationError(
+                "Resolve all detected conflicts before applying imported data."
+            )
+
+    def _validate_cv_file_name(self, file_name: str) -> None:
+        """Validate uploaded CV file extension."""
+
+        lowered = file_name.lower()
+        if not (lowered.endswith(".pdf") or lowered.endswith(".docx")):
+            raise ProfileImportValidationError("Only PDF and DOCX files are supported.")
+
+    def _persist_source_file(self, *, file_name: str, file_bytes: bytes) -> Path:
+        """Persist uploaded source file into import storage."""
+
+        safe_name = _safe_file_name(file_name)
+        target_dir = self._import_storage_dir / "cv"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / f"{uuid4().hex}_{safe_name}"
+        target_path.write_bytes(file_bytes)
+        return target_path
+
+    def _to_decision_payload(self, item: FieldDecisionInput) -> FieldDecisionPayload:
+        """Map API decision input to repository payload."""
+
+        if item.decision == "edit" and (item.edited_value is None or not item.edited_value.strip()):
+            raise ProfileImportValidationError("Edited decisions require non-empty edited_value.")
+
+        final_value = item.edited_value if item.decision == "edit" else None
+        return FieldDecisionPayload(
+            field_id=item.field_id,
+            decision=item.decision,
+            final_value=final_value,
+            reviewer_note=item.reviewer_note,
+        )
+
+    @staticmethod
+    def _to_resolution_payload(item: ConflictResolutionInput) -> ConflictResolutionPayload:
+        """Map API conflict resolution input to repository payload."""
+
+        return ConflictResolutionPayload(
+            conflict_id=item.conflict_id,
+            resolution_status=item.resolution_status,
+            resolution_note=item.resolution_note,
+        )
+
+    @staticmethod
+    def _to_run_response(run: ProfileImportRunModel) -> ProfileImportRunResponse:
+        """Map ORM import run model to API response schema."""
+
+        return ProfileImportRunResponse(
+            id=run.id,
+            source=ProfileImportSourceResponse(
+                id=run.source.id,
+                source_type=run.source.source_type,
+                source_label=run.source.source_label,
+                file_name=run.source.file_name,
+                source_url=run.source.source_url,
+                created_at=run.source.created_at,
+            ),
+            extractor_name=run.extractor_name,
+            extractor_version=run.extractor_version,
+            status=run.status,
+            detected_language=run.detected_language,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+            fields=[
+                ProfileImportFieldResponse(
+                    id=item.id,
+                    field_path=item.field_path,
+                    section_type=item.section_type,
+                    source_locator=item.source_locator,
+                    source_excerpt=item.source_excerpt,
+                    extracted_value=item.extracted_value,
+                    suggested_value=item.suggested_value,
+                    confidence_score=item.confidence_score,
+                    decision_status=item.decision_status,
+                    sort_order=item.sort_order,
+                    decisions=[
+                        ProfileImportDecisionResponse(
+                            id=decision.id,
+                            decision=decision.decision,
+                            final_value=decision.final_value,
+                            reviewer_note=decision.reviewer_note,
+                            created_at=decision.created_at,
+                        )
+                        for decision in item.decisions
+                    ],
+                )
+                for item in run.fields
+            ],
+            conflicts=[
+                ProfileImportConflictResponse(
+                    id=item.id,
+                    field_path=item.field_path,
+                    conflict_type=item.conflict_type,
+                    existing_value=item.existing_value,
+                    imported_value=item.imported_value,
+                    resolution_status=item.resolution_status,
+                    resolution_note=item.resolution_note,
+                    created_at=item.created_at,
+                    updated_at=item.updated_at,
+                )
+                for item in run.conflicts
+            ],
+            applied_facts=[
+                ProfileImportAppliedFactResponse(
+                    id=item.id,
+                    field_id=item.field_id,
+                    target_entity_type=item.target_entity_type,
+                    target_entity_id=item.target_entity_id,
+                    target_field_path=item.target_field_path,
+                    applied_value=item.applied_value,
+                    created_at=item.created_at,
+                )
+                for item in run.applied_facts
+            ],
+        )
+
+
+def _safe_file_name(file_name: str) -> str:
+    """Return filesystem-safe file name."""
+
+    normalized = re.sub(r"[^a-zA-Z0-9._-]", "_", file_name)
+    return normalized or "uploaded_source"
+
+
+def _draft_to_dict(draft: ImportedProfileDraft) -> dict[str, Any]:
+    """Convert imported profile draft into JSON-serializable mapping."""
+
+    return {
+        "full_name": draft.full_name,
+        "email": draft.email,
+        "phone": draft.phone,
+        "location": draft.location,
+        "headline": draft.headline,
+        "summary": draft.summary,
+        "experiences": [
+            {
+                "company": item.company,
+                "title": item.title,
+                "start_date": item.start_date,
+                "end_date": item.end_date,
+                "description": item.description,
+                "source_locator": item.source_locator,
+            }
+            for item in draft.experiences
+        ],
+        "educations": [
+            {
+                "institution": item.institution,
+                "degree": item.degree,
+                "field_of_study": item.field_of_study,
+                "start_date": item.start_date,
+                "end_date": item.end_date,
+                "source_locator": item.source_locator,
+            }
+            for item in draft.educations
+        ],
+        "skills": [
+            {
+                "skill_name": item.skill_name,
+                "level": item.level,
+                "category": item.category,
+                "source_locator": item.source_locator,
+            }
+            for item in draft.skills
+        ],
+    }
+
+
+def _merge_imported_profile_drafts(
+    *,
+    base: ImportedProfileDraft,
+    incoming: ImportedProfileDraft,
+) -> ImportedProfileDraft:
+    """Merge two imported profile drafts with append-only list behavior."""
+
+    return ImportedProfileDraft(
+        full_name=base.full_name or incoming.full_name,
+        email=base.email or incoming.email,
+        phone=base.phone or incoming.phone,
+        location=base.location or incoming.location,
+        headline=base.headline or incoming.headline,
+        summary=base.summary or incoming.summary,
+        experiences=_merge_experiences(base.experiences, incoming.experiences),
+        educations=_merge_educations(base.educations, incoming.educations),
+        skills=_merge_skills(base.skills, incoming.skills),
+    )
+
+
+def _merge_experiences(
+    base: list[Any],
+    incoming: list[Any],
+) -> list[Any]:
+    """Merge imported experience entries by company/title key."""
+
+    merged = list(base)
+    existing_keys = {(item.company.lower(), item.title.lower()) for item in merged}
+    for item in incoming:
+        key = (item.company.lower(), item.title.lower())
+        if key in existing_keys:
+            continue
+        existing_keys.add(key)
+        merged.append(item)
+    return merged
+
+
+def _merge_educations(base: list[Any], incoming: list[Any]) -> list[Any]:
+    """Merge imported education entries by institution/degree key."""
+
+    merged = list(base)
+    existing_keys = {(item.institution.lower(), item.degree.lower()) for item in merged}
+    for item in incoming:
+        key = (item.institution.lower(), item.degree.lower())
+        if key in existing_keys:
+            continue
+        existing_keys.add(key)
+        merged.append(item)
+    return merged
+
+
+def _merge_skills(base: list[Any], incoming: list[Any]) -> list[Any]:
+    """Merge imported skill entries by lower-case skill name."""
+
+    merged = list(base)
+    existing_names = {item.skill_name.lower() for item in merged}
+    for item in incoming:
+        key = item.skill_name.lower()
+        if key in existing_names:
+            continue
+        existing_names.add(key)
+        merged.append(item)
+    return merged
+
+
+def _build_profile_apply_payload(existing_profile_payload: dict[str, object] | None) -> dict[str, Any]:
+    """Build mutable payload used for apply merge operations."""
+
+    if existing_profile_payload is None:
+        return {
+            "full_name": "",
+            "email": "",
+            "phone": None,
+            "location": None,
+            "headline": None,
+            "summary": None,
+            "experiences": [],
+            "educations": [],
+            "skills": [],
+        }
+
+    active_version = existing_profile_payload.get("active_version")
+    if not isinstance(active_version, dict):
+        return {
+            "full_name": "",
+            "email": "",
+            "phone": None,
+            "location": None,
+            "headline": None,
+            "summary": None,
+            "experiences": [],
+            "educations": [],
+            "skills": [],
+        }
+
+    return {
+        "full_name": str(active_version.get("full_name", "")),
+        "email": str(active_version.get("email", "")),
+        "phone": _optional_string(active_version.get("phone")),
+        "location": _optional_string(active_version.get("location")),
+        "headline": _optional_string(active_version.get("headline")),
+        "summary": _optional_string(active_version.get("summary")),
+        "experiences": [
+            {
+                "company": str(item.get("company", "")),
+                "title": str(item.get("title", "")),
+                "start_date": item.get("start_date"),
+                "end_date": item.get("end_date"),
+                "description": item.get("description"),
+            }
+            for item in active_version.get("experiences", [])
+            if isinstance(item, dict)
+        ],
+        "educations": [
+            {
+                "institution": str(item.get("institution", "")),
+                "degree": str(item.get("degree", "")),
+                "field_of_study": item.get("field_of_study"),
+                "start_date": item.get("start_date"),
+                "end_date": item.get("end_date"),
+            }
+            for item in active_version.get("educations", [])
+            if isinstance(item, dict)
+        ],
+        "skills": [
+            {
+                "skill_name": str(item.get("skill_name", "")),
+                "level": item.get("level"),
+                "category": item.get("category"),
+            }
+            for item in active_version.get("skills", [])
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _apply_scalar_fields(
+    *,
+    payload: dict[str, Any],
+    fields: list[Any],
+    applied_field_paths: list[tuple[str, str]],
+) -> None:
+    """Apply scalar field decisions into payload."""
+
+    scalar_fields = {"full_name", "email", "phone", "location", "headline", "summary"}
+    for field in fields:
+        if field.field_path not in scalar_fields:
+            continue
+        if field.suggested_value is None:
+            continue
+        payload[field.field_path] = field.suggested_value
+        applied_field_paths.append((field.field_path, field.suggested_value))
+
+
+def _apply_experience_fields(
+    *,
+    payload: dict[str, Any],
+    fields: list[Any],
+    applied_field_paths: list[tuple[str, str]],
+) -> None:
+    """Apply experience field decisions into payload list."""
+
+    grouped: dict[int, dict[str, str]] = {}
+    for field in fields:
+        parsed = _parse_indexed_field_path(field.field_path)
+        if parsed is None or parsed[0] != "experiences":
+            continue
+        _, index, field_name = parsed
+        grouped.setdefault(index, {})[field_name] = field.suggested_value or ""
+
+    existing_pairs = {
+        (item.get("company", "").strip().lower(), item.get("title", "").strip().lower())
+        for item in payload["experiences"]
+    }
+
+    for source_index in sorted(grouped):
+        row = grouped[source_index]
+        company = row.get("company", "").strip()
+        title = row.get("title", "").strip()
+        if not company or not title:
+            continue
+
+        key = (company.lower(), title.lower())
+        if key in existing_pairs:
+            continue
+
+        existing_pairs.add(key)
+        entry = ExperienceInput(
+            company=company,
+            title=title,
+            start_date=_optional_date_string(row.get("start_date")),
+            end_date=_optional_date_string(row.get("end_date")),
+            description=_optional_string(row.get("description")),
+        )
+        payload["experiences"].append(entry.model_dump(mode="json"))
+
+        for field_name, value in row.items():
+            if not value:
+                continue
+            applied_field_paths.append((f"experiences[{source_index}].{field_name}", value))
+
+
+def _apply_education_fields(
+    *,
+    payload: dict[str, Any],
+    fields: list[Any],
+    applied_field_paths: list[tuple[str, str]],
+) -> None:
+    """Apply education field decisions into payload list."""
+
+    grouped: dict[int, dict[str, str]] = {}
+    for field in fields:
+        parsed = _parse_indexed_field_path(field.field_path)
+        if parsed is None or parsed[0] != "educations":
+            continue
+        _, index, field_name = parsed
+        grouped.setdefault(index, {})[field_name] = field.suggested_value or ""
+
+    existing_pairs = {
+        (item.get("institution", "").strip().lower(), item.get("degree", "").strip().lower())
+        for item in payload["educations"]
+    }
+
+    for source_index in sorted(grouped):
+        row = grouped[source_index]
+        institution = row.get("institution", "").strip()
+        degree = row.get("degree", "").strip()
+        if not institution or not degree:
+            continue
+
+        key = (institution.lower(), degree.lower())
+        if key in existing_pairs:
+            continue
+
+        existing_pairs.add(key)
+        entry = EducationInput(
+            institution=institution,
+            degree=degree,
+            field_of_study=_optional_string(row.get("field_of_study")),
+            start_date=_optional_date_string(row.get("start_date")),
+            end_date=_optional_date_string(row.get("end_date")),
+        )
+        payload["educations"].append(entry.model_dump(mode="json"))
+
+        for field_name, value in row.items():
+            if not value:
+                continue
+            applied_field_paths.append((f"educations[{source_index}].{field_name}", value))
+
+
+def _apply_skill_fields(
+    *,
+    payload: dict[str, Any],
+    fields: list[Any],
+    applied_field_paths: list[tuple[str, str]],
+) -> None:
+    """Apply skill field decisions into payload list."""
+
+    grouped: dict[int, dict[str, str]] = {}
+    for field in fields:
+        parsed = _parse_indexed_field_path(field.field_path)
+        if parsed is None or parsed[0] != "skills":
+            continue
+        _, index, field_name = parsed
+        grouped.setdefault(index, {})[field_name] = field.suggested_value or ""
+
+    existing_names = {item.get("skill_name", "").strip().lower() for item in payload["skills"]}
+
+    for source_index in sorted(grouped):
+        row = grouped[source_index]
+        skill_name = row.get("skill_name", "").strip()
+        if not skill_name:
+            continue
+
+        key = skill_name.lower()
+        if key in existing_names:
+            continue
+
+        existing_names.add(key)
+        entry = SkillInput(
+            skill_name=skill_name,
+            level=_optional_string(row.get("level")),
+            category=_optional_string(row.get("category")),
+        )
+        payload["skills"].append(entry.model_dump(mode="json"))
+
+        for field_name, value in row.items():
+            if not value:
+                continue
+            applied_field_paths.append((f"skills[{source_index}].{field_name}", value))
+
+
+def _parse_indexed_field_path(field_path: str) -> tuple[str, int, str] | None:
+    """Parse indexed section field path values."""
+
+    match = _INDEXED_PATH_PATTERN.match(field_path)
+    if match is None:
+        return None
+
+    section = match.group("section")
+    index = int(match.group("index"))
+    field_name = match.group("field")
+    return section, index, field_name
+
+
+def _optional_string(value: object) -> str | None:
+    """Return non-empty string representation for optional values."""
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def _optional_date_string(value: str | None) -> str | None:
+    """Return ISO date string when it matches ``YYYY-MM-DD``."""
+
+    if value is None:
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", candidate):
+        return None
+    return candidate

@@ -13,12 +13,15 @@ from app.frontend.pages.dashboard_page import register_dashboard_page
 from app.frontend.pages.job_intake_page import register_job_intake_page
 from app.frontend.pages.match_review_page import register_match_review_page
 from app.frontend.pages.output_review_page import register_output_review_page
+from app.frontend.pages.profile_import_page import register_profile_import_page
 from app.frontend.pages.profile_page import register_profile_page
 from app.frontend.services.application_package_api import ApplicationPackageApi
 from app.frontend.services.document_api import DocumentApi
 from app.frontend.services.job_post_api import JobPostApi
 from app.frontend.services.profile_api import ProfileApi
+from app.frontend.services.profile_import_api import ProfileImportApi
 from app.frontend.services.tailoring_api import TailoringApi
+from app.frontend.state.import_state import ProfileImportState
 from app.frontend.state.job_state import JobState
 from app.frontend.state.package_state import PackageState
 from app.frontend.state.profile_state import ProfileState
@@ -32,12 +35,14 @@ class FrontendRuntime:
     profile_state: ProfileState = field(default_factory=ProfileState)
     job_state: JobState = field(default_factory=JobState)
     package_state: PackageState = field(default_factory=PackageState)
+    import_state: ProfileImportState = field(default_factory=ProfileImportState)
     session_state: FrontendSessionState = field(default_factory=FrontendSessionState)
     profile_api: ProfileApi = field(default_factory=ProfileApi)
     job_post_api: JobPostApi = field(default_factory=JobPostApi)
     tailoring_api: TailoringApi = field(default_factory=TailoringApi)
     document_api: DocumentApi = field(default_factory=DocumentApi)
     package_api: ApplicationPackageApi = field(default_factory=ApplicationPackageApi)
+    profile_import_api: ProfileImportApi = field(default_factory=ProfileImportApi)
 
 
 _PAGES_REGISTERED = False
@@ -92,6 +97,10 @@ def _register_pages(runtime: FrontendRuntime) -> None:
     register_profile_page(
         profile_state=runtime.profile_state,
         profile_api=runtime.profile_api,
+    )
+    register_profile_import_page(
+        import_state=runtime.import_state,
+        profile_import_api=runtime.profile_import_api,
     )
     register_job_intake_page(
         job_state=runtime.job_state,

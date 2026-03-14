@@ -56,6 +56,7 @@ def register_dashboard_page(
 
             with ui.row().classes("w-full gap-3"):
                 ui.button("Edit Master Profile", on_click=lambda: ui.navigate.to("/profile"))
+                ui.button("Import CV/Website", on_click=lambda: ui.navigate.to("/profile-import"))
                 ui.button("Start Job Intake", on_click=lambda: ui.navigate.to("/job-intake"))
 
             _render_profile_completeness(profile_state)

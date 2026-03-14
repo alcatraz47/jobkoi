@@ -14,6 +14,14 @@ from app.db.models.profile import (
     ProfileExperienceModel,
     ProfileSkillModel,
 )
+from app.db.models.profile_import import (
+    ProfileImportAppliedFactModel,
+    ProfileImportConflictModel,
+    ProfileImportDecisionModel,
+    ProfileImportFieldModel,
+    ProfileImportRunModel,
+    ProfileImportSourceModel,
+)
 from app.db.models.tailoring import (
     ProfileSnapshotModel,
     SnapshotEducationModel,
@@ -42,4 +50,10 @@ __all__ = [
     "ApplicationPackageModel",
     "ApplicationPackageDocumentModel",
     "ApplicationPackageEventModel",
+    "ProfileImportSourceModel",
+    "ProfileImportRunModel",
+    "ProfileImportFieldModel",
+    "ProfileImportDecisionModel",
+    "ProfileImportConflictModel",
+    "ProfileImportAppliedFactModel",
 ]

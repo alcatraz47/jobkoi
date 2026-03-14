@@ -12,7 +12,7 @@ Skill and experience profiling software with deterministic Python orchestration 
 ## Bootstrap scope
 
 This repository currently includes:
-- FastAPI backend with profile, job ingestion, tailoring, document, and package APIs
+- FastAPI backend with profile, job ingestion, tailoring, document, package, and profile-import APIs
 - NiceGUI browser frontend integrated into the same application process
 - Typed settings with `pydantic-settings`
 - SQLAlchemy 2.0 engine and session providers
@@ -37,6 +37,27 @@ Open:
 
 Default local DB URL (from `.env.example`):
 - `postgresql+psycopg://jobkoi:jobkoi@localhost:5432/jobkoi`
+
+## Optional ingestion dependencies
+
+For improved CV/website extraction quality, install Docling and Trafilatura extras:
+
+```bash
+pip install -e ".[ingest]"
+```
+
+Jobkoi still runs without these extras and falls back to basic parsers.
+
+## Profile import workflow
+
+New ingestion features are available under **Profile Import** in the UI:
+- CV import (`.pdf`, `.docx`) with source-file traceability
+- Portfolio website import with same-domain crawl restrictions
+- Import review decisions (approve/edit/reject) before apply
+- Conflict detection and explicit resolution before apply
+- Applied-fact traceability mapping after profile update
+
+Imported data is never auto-committed to the master profile. A reviewed import run must be explicitly applied.
 
 ## Quick start (Docker Compose)
 
