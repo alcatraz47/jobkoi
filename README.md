@@ -12,7 +12,7 @@ This repository currently includes:
 - SQLAlchemy 2.0 engine and session providers
 - Health endpoint
 
-## Quick start
+## Quick start (local)
 
 ```bash
 python -m venv .venv
@@ -26,4 +26,29 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/health
+```
+
+## Quick start (Docker Compose)
+
+```bash
+docker compose up --build -d
+```
+
+This starts:
+- `app` at `http://127.0.0.1:8000`
+- `postgres` at `127.0.0.1:5432`
+- `redis` at `127.0.0.1:6379`
+
+The app container initializes database tables automatically on startup.
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8000/api/v1/health
+```
+
+Stop all services:
+
+```bash
+docker compose down
 ```

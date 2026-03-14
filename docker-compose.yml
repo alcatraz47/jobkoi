@@ -1,0 +1,60 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jobkoi-app
+    environment:
+      JOBKOI_APP_ENV: docker
+      JOBKOI_APP_HOST: 0.0.0.0
+      JOBKOI_APP_PORT: 8000
+      JOBKOI_APP_LOG_LEVEL: INFO
+      JOBKOI_DATABASE_URL: postgresql+psycopg://jobkoi:jobkoi@postgres:5432/jobkoi
+      JOBKOI_SQLALCHEMY_ECHO: "false"
+      JOBKOI_DOCUMENT_STORAGE_DIR: /var/lib/jobkoi/documents
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage/documents:/var/lib/jobkoi/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: jobkoi-postgres
+    environment:
+      POSTGRES_USER: jobkoi
+      POSTGRES_PASSWORD: jobkoi
+      POSTGRES_DB: jobkoi
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobkoi -d jobkoi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: jobkoi-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
