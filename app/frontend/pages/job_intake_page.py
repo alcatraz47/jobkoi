@@ -40,7 +40,7 @@ def register_job_intake_page(
         with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
             ui.label("Job Intake").classes("text-2xl font-semibold")
             ui.label(
-                "Paste job details, store a job post, and run deterministic requirement analysis."
+                "Paste job details, store a job post, and run deterministic or LLM-assisted analysis."
             ).classes("text-sm text-slate-600")
 
             render_job_input_form(job_state)
@@ -119,7 +119,12 @@ async def _analyze_job_post(
         return
 
     try:
-        analysis = await run.io_bound(lambda: job_post_api.analyze_job_post(job_post_id, use_llm=False))
+        analysis = await run.io_bound(
+            lambda: job_post_api.analyze_job_post(
+                job_post_id,
+                use_llm=job_state.intake.use_llm_analysis,
+            )
+        )
     except FrontendApiError as exc:
         ui.notify(str(exc), color="negative")
         return
@@ -138,6 +143,7 @@ def _render_job_context(*, job_state: JobState, session_state: FrontendSessionSt
         ui.label(f"Job Post ID: {session_state.selected_job_post_id or '-'}").classes("text-sm")
         ui.label(f"Job Analysis ID: {session_state.selected_analysis_id or '-'}").classes("text-sm")
         ui.label(f"Target language: {session_state.target_language}").classes("text-sm")
+        ui.label(f"LLM analysis enabled: {job_state.intake.use_llm_analysis}").classes("text-sm")
 
         if job_state.analysis is None:
             ui.label("No analysis loaded yet.").classes("text-sm text-slate-600")

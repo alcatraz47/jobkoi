@@ -15,7 +15,7 @@ services:
       JOBKOI_IMPORT_STORAGE_DIR: /var/lib/jobkoi/imports
       JOBKOI_OLLAMA_BASE_URL: http://host.docker.internal:11434
       JOBKOI_OLLAMA_MODEL: qwen2.5:3b
-      JOBKOI_OLLAMA_TIMEOUT_SECONDS: "30"
+      JOBKOI_OLLAMA_TIMEOUT_SECONDS: "120"
       JOBKOI_OLLAMA_MAX_RETRIES: "1"
     ports:
       - "8000:8000"

@@ -48,6 +48,11 @@ def render_job_input_form(job_state: JobState) -> None:
             label="Target Language",
             on_change=lambda event: _set_language(job_state, str(event.value)),
         )
+        ui.switch(
+            "Use LLM-assisted analysis",
+            value=job_state.intake.use_llm_analysis,
+            on_change=lambda event: _set_use_llm_analysis(job_state, bool(event.value)),
+        )
         ui.textarea(
             "Optional Notes",
             value=job_state.intake.notes or "",
@@ -83,6 +88,12 @@ def _set_language(job_state: JobState, value: str) -> None:
     """Set target language field."""
 
     job_state.intake.language = value or "en"
+
+
+def _set_use_llm_analysis(job_state: JobState, value: bool) -> None:
+    """Set optional LLM analysis toggle field."""
+
+    job_state.intake.use_llm_analysis = value
 
 
 def _set_notes(job_state: JobState, value: str) -> None:

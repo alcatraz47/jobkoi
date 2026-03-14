@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     import_storage_dir: str = Field(default="storage/imports")
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
     ollama_model: str = Field(default="qwen2.5:3b")
-    ollama_timeout_seconds: float = Field(default=30.0)
+    ollama_timeout_seconds: float = Field(default=120.0, gt=0)
     ollama_max_retries: int = Field(default=1, ge=0)
 
 
