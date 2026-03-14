@@ -38,6 +38,38 @@ def test_build_imported_profile_from_text_extracts_core_fields() -> None:
     assert [item.skill_name for item in draft.skills] == ["Python", "FastAPI", "SQL"]
 
 
+def test_build_imported_profile_from_text_handles_website_style_content() -> None:
+    """Builder should parse useful data from website-style multi-line content."""
+
+    text = """
+    Md Mahmudul Haque
+    AI Engineer • Computer Vision • NLP • LLMs/VLMs
+    Skills AI Engineering • Computer Vision • NLP • LLMs/VLMs
+    I am currently working at Fraunhofer IML, delivering computer vision and OCR solutions.
+    """
+
+    draft = build_imported_profile_from_text(text=text, source_locator="https://portfolio.example.dev")
+
+    assert draft.full_name == "Md Mahmudul Haque"
+    assert draft.headline is not None
+    assert any(skill.skill_name == "Computer Vision" for skill in draft.skills)
+    assert any(skill.skill_name == "NLP" for skill in draft.skills)
+
+
+def test_phone_extraction_ignores_isbn_numbers() -> None:
+    """Builder should avoid mapping ISBN-like values as phone numbers."""
+
+    text = """
+    Arfan Example
+    ISBN 978-981-15-8354-4
+    Contact +49 176 1234567
+    """
+
+    draft = build_imported_profile_from_text(text=text, source_locator="resume.pdf")
+
+    assert draft.phone == "+49 176 1234567"
+
+
 def test_flatten_imported_profile_to_fields_emits_ordered_paths() -> None:
     """Flattening should produce deterministic field paths for review workflows."""
 

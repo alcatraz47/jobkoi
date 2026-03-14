@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from nicegui import run, ui
-from nicegui.events import UploadEventArguments
 
 from app.frontend.components.navigation import render_navigation
 from app.frontend.services.api_client import FrontendApiError
@@ -52,15 +51,25 @@ def register_profile_import_page(
             with ui.card().classes("w-full"):
                 ui.label("CV Import (PDF/DOCX)").classes("text-md font-semibold")
 
-                async def on_upload(event: UploadEventArguments) -> None:
+                async def on_upload(event: Any) -> None:
                     """Capture uploaded file payload."""
 
-                    upload_file = event.file
-                    pending_upload["name"] = str(upload_file.name or "uploaded_cv")
-                    pending_upload["content_type"] = str(
-                        upload_file.content_type or "application/octet-stream"
-                    )
-                    pending_upload["bytes"] = await upload_file.read()
+                    file_object = getattr(event, "file", None)
+                    if file_object is not None and hasattr(file_object, "read"):
+                        pending_upload["name"] = str(getattr(file_object, "name", "uploaded_cv") or "uploaded_cv")
+                        pending_upload["content_type"] = str(
+                            getattr(file_object, "content_type", "application/octet-stream")
+                            or "application/octet-stream"
+                        )
+                        pending_upload["bytes"] = bytes(await file_object.read())
+                    else:
+                        pending_upload["name"] = str(getattr(event, "name", "uploaded_cv"))
+                        pending_upload["content_type"] = str(
+                            getattr(event, "type", "application/octet-stream")
+                            or "application/octet-stream"
+                        )
+                        pending_upload["bytes"] = _read_upload_bytes_legacy(getattr(event, "content", None))
+
                     if pending_upload["bytes"]:
                         ui.notify(f"Loaded file: {pending_upload['name']}", color="info")
                     else:
@@ -455,3 +464,43 @@ def _set_conflict_resolution_note(
     draft = import_state.conflict_resolutions.setdefault(conflict_id, ConflictResolutionDraft())
     draft.resolution_note = note or None
 
+
+
+def _read_upload_bytes_legacy(content: Any) -> bytes:
+    """Read upload bytes for legacy NiceGUI upload events.
+
+    Args:
+        content: Legacy upload content object.
+
+    Returns:
+        Raw uploaded bytes, or empty bytes when content cannot be read.
+    """
+
+    if content is None:
+        return b""
+
+    if isinstance(content, (bytes, bytearray)):
+        return bytes(content)
+
+    if hasattr(content, "read"):
+        try:
+            raw = content.read()
+        except Exception:
+            raw = None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        if isinstance(raw, str):
+            return raw.encode("utf-8", errors="ignore")
+
+    file_object = getattr(content, "file", None)
+    if hasattr(file_object, "read"):
+        try:
+            raw = file_object.read()
+        except Exception:
+            raw = None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        if isinstance(raw, str):
+            return raw.encode("utf-8", errors="ignore")
+
+    return b""
