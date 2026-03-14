@@ -21,6 +21,8 @@ class Settings(BaseSettings):
         sqlalchemy_echo: Enables SQL query echo logging when True.
         document_storage_dir: Local directory for generated document files.
         import_storage_dir: Local directory for import source file storage.
+        profile_import_auto_approve_enabled: Enables confidence-based auto-approval.
+        profile_import_auto_approve_min_confidence: Minimum confidence for auto-approval.
         ollama_base_url: Base URL for local/remote Ollama server.
         ollama_model: Ollama model name used by LLM helpers.
         ollama_timeout_seconds: Timeout for Ollama HTTP calls.
@@ -45,6 +47,8 @@ class Settings(BaseSettings):
     sqlalchemy_echo: bool = Field(default=False)
     document_storage_dir: str = Field(default="storage/documents")
     import_storage_dir: str = Field(default="storage/imports")
+    profile_import_auto_approve_enabled: bool = Field(default=True)
+    profile_import_auto_approve_min_confidence: int = Field(default=94, ge=0, le=100)
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
     ollama_model: str = Field(default="qwen2.5:3b")
     ollama_timeout_seconds: float = Field(default=120.0, gt=0)

@@ -1,0 +1,31 @@
+name: Extraction Quality
+
+on:
+  pull_request:
+    branches: ["main", "dev"]
+  push:
+    branches: ["main", "dev"]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Run extraction quality gate
+        run: python scripts/profile_import_quality_gate.py

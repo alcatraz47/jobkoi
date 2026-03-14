@@ -49,8 +49,17 @@ class ProfileImportState:
             field_id = str(field.get("id", ""))
             if not field_id:
                 continue
+
             status = str(field.get("decision_status", "pending"))
+            confidence = _to_int(field.get("confidence_score"))
+            recommendation = str(field.get("recommended_decision", "review"))
+
             decision = _status_to_decision(status)
+            if status == "pending" and recommendation == "approve":
+                decision = "approve"
+            elif status == "pending" and confidence < 60:
+                decision = "edit"
+
             suggested = field.get("suggested_value")
             self.field_decisions[field_id] = ImportDecisionDraft(
                 decision=decision,
@@ -80,3 +89,12 @@ def _status_to_decision(status: str) -> str:
     if status == "edited":
         return "edit"
     return "approve"
+
+
+def _to_int(value: object) -> int:
+    """Convert one value to integer with zero fallback."""
+
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except Exception:
+        return 0

@@ -40,7 +40,7 @@ Default local DB URL (from `.env.example`):
 
 ## Optional ingestion dependencies
 
-For improved CV/website extraction quality, install Docling and Trafilatura extras:
+For improved CV extraction quality, install the optional Docling extra:
 
 ```bash
 pip install -e ".[ingest]"
@@ -100,3 +100,32 @@ Reset Postgres volume and reinitialize:
 docker compose down -v
 docker compose up --build -d
 ```
+
+## Extraction quality baseline
+
+To score current profile-import extraction quality against golden cases:
+
+```bash
+python scripts/profile_import_quality_report.py
+```
+
+Dataset and process docs:
+- `tests/quality/profile_import_goldens.json`
+- `docs/extraction_quality_program.md`
+
+## Extraction quality program
+
+Run full extraction quality workflow locally:
+
+```bash
+python scripts/profile_import_quality_report.py
+python scripts/profile_import_calibrate_confidence.py
+python scripts/profile_import_quality_gate.py
+```
+
+Artifacts:
+- Golden dataset: `tests/quality/profile_import_goldens.json`
+- Confidence policy: `tests/quality/confidence_policy.json`
+- Calibration report: `tests/quality/confidence_calibration_report.json`
+- Gate thresholds: `tests/quality/quality_gate_thresholds.json`
+- Program doc: `docs/extraction_quality_program.md`

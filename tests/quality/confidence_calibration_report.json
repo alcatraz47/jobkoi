@@ -1,0 +1,46 @@
+{
+  "dataset": "tests/quality/profile_import_goldens.json",
+  "observation_count": 353,
+  "sections": {
+    "personal": {
+      "observation_count": 76,
+      "recommended_auto_approve_threshold": 50,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "selected_count": 76
+    },
+    "summary": {
+      "observation_count": 42,
+      "recommended_auto_approve_threshold": 50,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "selected_count": 42
+    },
+    "experience": {
+      "observation_count": 64,
+      "recommended_auto_approve_threshold": 50,
+      "precision": 0.9375,
+      "recall": 1.0,
+      "f1": 0.9677,
+      "selected_count": 64
+    },
+    "education": {
+      "observation_count": 42,
+      "recommended_auto_approve_threshold": 50,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "selected_count": 42
+    },
+    "skill": {
+      "observation_count": 129,
+      "recommended_auto_approve_threshold": 50,
+      "precision": 0.969,
+      "recall": 1.0,
+      "f1": 0.9843,
+      "selected_count": 129
+    }
+  }
+}

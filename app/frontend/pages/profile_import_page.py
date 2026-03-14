@@ -326,10 +326,16 @@ def _render_field_decision_row(*, import_state: ProfileImportState, field: dict[
 
     decision = import_state.field_decisions.setdefault(field_id, ImportDecisionDraft())
     extracted_value = str(field.get("extracted_value") or "")
+    confidence_score = int(field.get("confidence_score") or 0)
+    review_risk = str(field.get("review_risk") or "unknown")
+    recommended = str(field.get("recommended_decision") or "review")
 
     with ui.card().classes("w-full bg-slate-50"):
         ui.label(str(field.get("field_path", "-"))).classes("text-sm font-semibold")
         ui.label(extracted_value or "(empty)").classes("text-xs text-slate-700")
+        ui.label(
+            f"Confidence: {confidence_score} | Risk: {review_risk} | Recommended: {recommended}"
+        ).classes("text-xs text-slate-500")
 
         ui.select(
             options={"approve": "Approve", "edit": "Edit", "reject": "Reject"},

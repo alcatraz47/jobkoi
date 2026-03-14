@@ -43,6 +43,8 @@ class ProfileImportFieldResponse(BaseModel):
     suggested_value: str | None
     confidence_score: int
     decision_status: str
+    recommended_decision: str
+    review_risk: str
     sort_order: int
     decisions: list[ProfileImportDecisionResponse]
 

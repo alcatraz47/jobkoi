@@ -27,6 +27,12 @@ from app.domain.profile_import_builders import (
     detect_import_language,
     flatten_imported_profile_to_fields,
 )
+from app.domain.profile_import_confidence import (
+    ImportReviewPolicy,
+    default_decision_status,
+    recommend_review_decision,
+    risk_level_for_field,
+)
 from app.domain.profile_import_conflicts import detect_import_conflicts
 from app.domain.profile_import_types import ImportedProfileDraft
 from app.schemas.profile import (
@@ -95,14 +101,23 @@ class ProfileImportService:
         self._session = session
         self._repository = ProfileImportRepository(session)
         self._profile_service = ProfileService(session)
+        settings = get_settings()
+
         self._cv_extractor = cv_extractor or CvImportExtractor()
         self._website_extractor = website_extractor or WebsiteImportExtractor()
         if import_storage_dir is None:
-            settings = get_settings()
             import_storage_dir = Path(
                 getattr(settings, "import_storage_dir", "storage/imports")
             )
         self._import_storage_dir = import_storage_dir
+        self._review_policy = ImportReviewPolicy(
+            auto_approve_min_confidence=int(
+                getattr(settings, "profile_import_auto_approve_min_confidence", 94)
+            )
+        )
+        self._auto_approve_enabled = bool(
+            getattr(settings, "profile_import_auto_approve_enabled", True)
+        )
 
     def import_cv(
         self,
@@ -385,14 +400,19 @@ class ProfileImportService:
             imported_draft=draft,
         )
 
-        return ImportRunPayload(
-            extractor_name=extractor_name,
-            extractor_version=extractor_version,
-            status="extracted",
-            detected_language=detect_import_language(raw_text),
-            raw_text=raw_text,
-            structured_payload_json=json.dumps(_draft_to_dict(draft), ensure_ascii=True),
-            fields=[
+        conflict_paths = {item.field_path for item in conflicts}
+        prepared_fields: list[ImportFieldPayload] = []
+        for item in field_rows:
+            status = "pending"
+            if self._auto_approve_enabled and item.field_path not in conflict_paths:
+                status = default_decision_status(
+                    section_type=item.section_type,
+                    field_path=item.field_path,
+                    confidence_score=item.confidence_score,
+                    policy=self._review_policy,
+                )
+
+            prepared_fields.append(
                 ImportFieldPayload(
                     field_path=item.field_path,
                     section_type=item.section_type,
@@ -401,10 +421,19 @@ class ProfileImportService:
                     extracted_value=item.extracted_value,
                     suggested_value=item.suggested_value,
                     confidence_score=item.confidence_score,
+                    decision_status=status,
                     sort_order=item.sort_order,
                 )
-                for item in field_rows
-            ],
+            )
+
+        return ImportRunPayload(
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            status="extracted",
+            detected_language=detect_import_language(raw_text),
+            raw_text=raw_text,
+            structured_payload_json=json.dumps(_draft_to_dict(draft), ensure_ascii=True),
+            fields=prepared_fields,
             conflicts=[
                 ImportConflictPayload(
                     field_path=item.field_path,
@@ -487,8 +516,8 @@ class ProfileImportService:
             reviewer_note=item.reviewer_note,
         )
 
-    @staticmethod
-    def _to_resolution_payload(item: ConflictResolutionInput) -> ConflictResolutionPayload:
+
+    def _to_resolution_payload(self, item: ConflictResolutionInput) -> ConflictResolutionPayload:
         """Map API conflict resolution input to repository payload."""
 
         return ConflictResolutionPayload(
@@ -497,8 +526,8 @@ class ProfileImportService:
             resolution_note=item.resolution_note,
         )
 
-    @staticmethod
-    def _to_run_response(run: ProfileImportRunModel) -> ProfileImportRunResponse:
+
+    def _to_run_response(self, run: ProfileImportRunModel) -> ProfileImportRunResponse:
         """Map ORM import run model to API response schema."""
 
         return ProfileImportRunResponse(
@@ -528,6 +557,17 @@ class ProfileImportService:
                     suggested_value=item.suggested_value,
                     confidence_score=item.confidence_score,
                     decision_status=item.decision_status,
+                    recommended_decision=recommend_review_decision(
+                        section_type=item.section_type,
+                        field_path=item.field_path,
+                        confidence_score=item.confidence_score,
+                        policy=self._review_policy,
+                    ),
+                    review_risk=risk_level_for_field(
+                        field_path=item.field_path,
+                        section_type=item.section_type,
+                        confidence_score=item.confidence_score,
+                    ),
                     sort_order=item.sort_order,
                     decisions=[
                         ProfileImportDecisionResponse(
@@ -619,6 +659,15 @@ def _draft_to_dict(draft: ImportedProfileDraft) -> dict[str, Any]:
             }
             for item in draft.skills
         ],
+        "unmapped_candidates": [
+            {
+                "text": item.text,
+                "section_hint": item.section_hint,
+                "reason": item.reason,
+                "source_locator": item.source_locator,
+            }
+            for item in draft.unmapped_candidates
+        ],
     }
 
 
@@ -639,6 +688,10 @@ def _merge_imported_profile_drafts(
         experiences=_merge_experiences(base.experiences, incoming.experiences),
         educations=_merge_educations(base.educations, incoming.educations),
         skills=_merge_skills(base.skills, incoming.skills),
+        unmapped_candidates=_merge_unmapped_candidates(
+            base.unmapped_candidates,
+            incoming.unmapped_candidates,
+        ),
     )
 
 
@@ -683,6 +736,20 @@ def _merge_skills(base: list[Any], incoming: list[Any]) -> list[Any]:
         if key in existing_names:
             continue
         existing_names.add(key)
+        merged.append(item)
+    return merged
+
+
+def _merge_unmapped_candidates(base: list[Any], incoming: list[Any]) -> list[Any]:
+    """Merge unmapped candidates by normalized text key."""
+
+    merged = list(base)
+    existing_keys = {str(item.text).strip().lower() for item in merged}
+    for item in incoming:
+        key = str(item.text).strip().lower()
+        if not key or key in existing_keys:
+            continue
+        existing_keys.add(key)
         merged.append(item)
     return merged
 
