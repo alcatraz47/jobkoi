@@ -149,17 +149,18 @@ def register_profile_import_page(
                 url_input = ui.input(
                     "Public URL",
                     value=website_url["value"],
-                )
+                ).classes("w-full max-w-2xl")
                 url_input.bind_value(website_url, "value")
 
                 max_pages_input = ui.number(
-                    "Max same-domain pages",
+                    "Max pages",
                     value=website_max_pages["value"],
                     min=1,
                     max=10,
                     step=1,
-                )
+                ).classes("w-56")
                 max_pages_input.bind_value(website_max_pages, "value")
+                ui.label("Same-domain crawl limit (1-10 pages). ").classes("text-xs text-slate-500")
 
                 with ui.dialog().props("persistent") as website_import_progress, ui.card().classes("items-center gap-3 p-6"):
                     ui.spinner(size="lg")
