@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.llm.contracts import ProfileImportExtractionResponse
-from app.schemas.profile_import import FieldDecisionInput, ProfileImportReviewRequest
+from app.schemas.profile_import import FieldDecisionInput, ProfileImportReviewRequest, WebsiteImportRequest
 from app.services.profile_import_extractors import ExtractedTextResult, ProfileImportExtractionError, WebsitePageResult
 from app.services.profile_import_service import (
     ProfileImportRunNotFoundError,
@@ -54,10 +54,28 @@ class _FakeWebsiteExtractor:
 def test_service_apply_requires_review_decisions(db_session: Session, tmp_path) -> None:
     """Service should reject apply when no approved fields exist."""
 
+    class _LongWebsiteExtractor:
+        """Deterministic website extractor yielding long text for LLM path tests."""
+
+        def extract_from_url(self, *, url: str, max_pages: int) -> tuple[str, list[WebsitePageResult]]:
+            _ = (url, max_pages)
+            return (
+                "fake_website",
+                [
+                    WebsitePageResult(
+                        url="https://portfolio.example.dev",
+                        text=(
+                            "Arfan Example builds backend systems with Python and FastAPI for logistics workflows. "
+                            "He designs data pipelines and deployment automation across production environments."
+                        ),
+                    )
+                ],
+            )
+
     service = ProfileImportService(
         db_session,
         cv_extractor=_FakeCvExtractor(),
-        website_extractor=_FakeWebsiteExtractor(),
+        website_extractor=_LongWebsiteExtractor(),
         import_storage_dir=tmp_path,
     )
 
@@ -306,3 +324,66 @@ def test_service_enqueue_cv_import_marks_failed_on_extraction_error(
 
     failed = service.get_run(queued.id)
     assert failed.status == "failed"
+
+
+
+def test_service_website_import_merges_supported_llm_fields_only(
+    db_session: Session,
+    tmp_path,
+) -> None:
+    """Website import should use LLM merge path with source-supported fields only."""
+
+    class _LongWebsiteExtractor:
+        """Deterministic website extractor yielding long text for LLM path tests."""
+
+        def extract_from_url(self, *, url: str, max_pages: int) -> tuple[str, list[WebsitePageResult]]:
+            _ = (url, max_pages)
+            return (
+                "fake_website",
+                [
+                    WebsitePageResult(
+                        url="https://portfolio.example.dev",
+                        text=(
+                            "Arfan Example builds backend systems with Python and FastAPI for logistics workflows. "
+                            "He designs data pipelines and deployment automation across production environments."
+                        ),
+                    )
+                ],
+            )
+
+    service = ProfileImportService(
+        db_session,
+        cv_extractor=_FakeCvExtractor(),
+        website_extractor=_LongWebsiteExtractor(),
+        import_storage_dir=tmp_path,
+    )
+    service._profile_import_llm_enabled = True
+    service._profile_import_extraction_helper = _FakeProfileImportExtractionHelper(
+        ProfileImportExtractionResponse(
+            full_name={
+                "value": "Arfan Example",
+                "source_excerpt": "Arfan Example",
+                "source_locator": "https://portfolio.example.dev",
+            },
+            skills=[
+                {
+                    "skill_name": "Python",
+                    "source_excerpt": "Python",
+                    "source_locator": "https://portfolio.example.dev",
+                },
+                {
+                    "skill_name": "Invented Skill",
+                    "source_excerpt": "Invented Skill",
+                    "source_locator": "https://portfolio.example.dev",
+                },
+            ],
+        )
+    )
+
+    run = service.import_website(
+        WebsiteImportRequest(url="https://portfolio.example.dev", max_pages=2)
+    )
+
+    assert run.extractor_name.endswith("+llm")
+    values = [field.suggested_value for field in run.fields if field.suggested_value is not None]
+    assert "Invented Skill" not in values

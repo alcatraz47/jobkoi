@@ -35,7 +35,12 @@ def register_profile_import_page(
     async def profile_import_page() -> None:
         """Render profile import workflow page."""
 
-        await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+        runs_request_state: dict[str, int] = {"request_id": 0}
+        await _load_runs(
+            import_state=import_state,
+            profile_import_api=profile_import_api,
+            runs_request_state=runs_request_state,
+        )
 
         render_navigation()
         with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
@@ -64,6 +69,7 @@ def register_profile_import_page(
                     import_state=import_state,
                     profile_import_api=profile_import_api,
                     known_run_statuses=known_run_statuses,
+                    runs_request_state=runs_request_state,
                     activity_rows=activity_rows,
                 )
 
@@ -138,7 +144,11 @@ def register_profile_import_page(
                         cv_import_progress.close()
 
                     import_state.load_selected_run(run_payload)
-                    await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+                    await _load_runs(
+                        import_state=import_state,
+                        profile_import_api=profile_import_api,
+                        runs_request_state=runs_request_state,
+                    )
                     _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
                     ui.notify("CV import queued. You will be notified when parsing finishes.", color="positive")
 
@@ -192,20 +202,33 @@ def register_profile_import_page(
                         website_import_progress.close()
 
                     import_state.load_selected_run(run_payload)
-                    await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+                    await _load_runs(
+                        import_state=import_state,
+                        profile_import_api=profile_import_api,
+                        runs_request_state=runs_request_state,
+                    )
                     _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
                     ui.notify("Website import run created.", color="positive")
 
                 ui.button("Start Website Import", on_click=import_website_action)
 
-            _render_run_list(import_state=import_state, profile_import_api=profile_import_api)
-            _render_selected_run_review(import_state=import_state, profile_import_api=profile_import_api)
+            _render_run_list(
+                import_state=import_state,
+                profile_import_api=profile_import_api,
+                runs_request_state=runs_request_state,
+            )
+            _render_selected_run_review(
+                import_state=import_state,
+                profile_import_api=profile_import_api,
+                runs_request_state=runs_request_state,
+            )
 
 
 def _render_run_list(
     *,
     import_state: ProfileImportState,
     profile_import_api: ProfileImportApi,
+    runs_request_state: dict[str, int],
 ) -> None:
     """Render import run list panel with retract and delete actions."""
 
@@ -237,7 +260,11 @@ def _render_run_list(
                     return
 
                 import_state.load_selected_run(run_payload)
-                await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+                await _load_runs(
+                    import_state=import_state,
+                    profile_import_api=profile_import_api,
+                    runs_request_state=runs_request_state,
+                )
                 ui.notify("Import run retracted.", color="warning")
                 ui.navigate.to(f"/profile-import?run_id={target_run_id}")
 
@@ -255,7 +282,11 @@ def _render_run_list(
                     import_state.field_decisions = {}
                     import_state.conflict_resolutions = {}
 
-                await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+                await _load_runs(
+                    import_state=import_state,
+                    profile_import_api=profile_import_api,
+                    runs_request_state=runs_request_state,
+                )
                 ui.notify("Import run deleted.", color="warning")
                 ui.navigate.to("/profile-import")
 
@@ -272,6 +303,7 @@ def _render_selected_run_review(
     *,
     import_state: ProfileImportState,
     profile_import_api: ProfileImportApi,
+    runs_request_state: dict[str, int],
 ) -> None:
     """Render selected run review form and apply actions."""
 
@@ -348,7 +380,11 @@ def _render_selected_run_review(
                 return
 
             import_state.load_selected_run(run_payload)
-            await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+            await _load_runs(
+                import_state=import_state,
+                profile_import_api=profile_import_api,
+                runs_request_state=runs_request_state,
+            )
             ui.notify("Review decisions saved.", color="positive")
             ui.navigate.to(f"/profile-import?run_id={selected_id}")
 
@@ -392,7 +428,11 @@ def _render_selected_run_review(
             run_payload = response.get("run", {})
             if isinstance(run_payload, dict):
                 import_state.load_selected_run(run_payload)
-            await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+            await _load_runs(
+                import_state=import_state,
+                profile_import_api=profile_import_api,
+                runs_request_state=runs_request_state,
+            )
             ui.notify("Imported data applied as new profile version.", color="positive")
             ui.navigate.to("/profile")
 
@@ -412,7 +452,11 @@ def _render_selected_run_review(
                 return
 
             import_state.load_selected_run(run_payload)
-            await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+            await _load_runs(
+                import_state=import_state,
+                profile_import_api=profile_import_api,
+                runs_request_state=runs_request_state,
+            )
             ui.notify("Import run rejected.", color="warning")
             ui.navigate.to(f"/profile-import?run_id={selected_id}")
 
@@ -657,6 +701,7 @@ async def _poll_import_activity(
     import_state: ProfileImportState,
     profile_import_api: ProfileImportApi,
     known_run_statuses: dict[str, str],
+    runs_request_state: dict[str, int],
     activity_rows: Any,
 ) -> None:
     """Poll import runs, refresh activity panel, and notify on status transitions.
@@ -665,11 +710,16 @@ async def _poll_import_activity(
         import_state: Shared import workflow state.
         profile_import_api: Profile import API adapter.
         known_run_statuses: Mutable map of known statuses by run id.
+        runs_request_state: Request version state for race-safe run refreshes.
         activity_rows: NiceGUI container for activity rows.
     """
 
     previous_statuses = dict(known_run_statuses)
-    await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+    await _load_runs(
+        import_state=import_state,
+        profile_import_api=profile_import_api,
+        runs_request_state=runs_request_state,
+    )
     _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
 
     latest_statuses = _build_run_status_map(import_state.runs)
@@ -719,13 +769,25 @@ async def _poll_import_activity(
 
 
 
-async def _load_runs(*, import_state: ProfileImportState, profile_import_api: ProfileImportApi) -> None:
+async def _load_runs(
+    *,
+    import_state: ProfileImportState,
+    profile_import_api: ProfileImportApi,
+    runs_request_state: dict[str, int],
+) -> None:
     """Load import runs into page state."""
+
+    request_id = int(runs_request_state.get("request_id", 0)) + 1
+    runs_request_state["request_id"] = request_id
 
     try:
         payload = await run.io_bound(profile_import_api.list_runs)
     except FrontendApiError as exc:
-        ui.notify(str(exc), color="negative")
+        if request_id == int(runs_request_state.get("request_id", 0)):
+            ui.notify(str(exc), color="negative")
+        return
+
+    if request_id != int(runs_request_state.get("request_id", 0)):
         return
 
     import_state.runs = [item for item in payload.get("runs", []) if isinstance(item, dict)]
