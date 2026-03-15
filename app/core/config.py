@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     profile_import_llm_enabled: bool = Field(default=False)
     profile_import_llm_max_input_chars: int = Field(default=24000, ge=1000)
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
-    ollama_model: str = Field(default="qwen2.5:3b")
+    ollama_model: str = Field(default="qwen3.5:4b")
     ollama_timeout_seconds: float = Field(default=120.0, gt=0)
     ollama_max_retries: int = Field(default=1, ge=0)
 

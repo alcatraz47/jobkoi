@@ -28,7 +28,7 @@ class OllamaClientSettings:
     """
 
     base_url: str = "http://127.0.0.1:11434"
-    model: str = "qwen2.5:3b"
+    model: str = "qwen3.5:4b"
     timeout_seconds: float = 120.0
     max_retries: int = 1
 
