@@ -25,7 +25,9 @@ class Settings(BaseSettings):
         profile_import_auto_approve_enabled: Enables confidence-based auto-approval.
         profile_import_auto_approve_min_confidence: Minimum confidence for auto-approval.
         profile_import_llm_enabled: Enables LLM-assisted import extraction stage.
-        profile_import_llm_max_input_chars: Max characters sent to LLM during import extraction.
+        profile_import_llm_max_input_chars: Max characters sent to LLM during proposal extraction.
+        profile_import_llm_supervisor_enabled: Enables optional second-pass LLM audit.
+        profile_import_llm_supervisor_max_input_chars: Max characters sent to LLM during audit pass.
         ollama_base_url: Base URL for local/remote Ollama server.
         ollama_model: Ollama model name used by LLM helpers.
         ollama_timeout_seconds: Timeout for Ollama HTTP calls.
@@ -54,7 +56,9 @@ class Settings(BaseSettings):
     profile_import_auto_approve_enabled: bool = Field(default=True)
     profile_import_auto_approve_min_confidence: int = Field(default=94, ge=0, le=100)
     profile_import_llm_enabled: bool = Field(default=False)
-    profile_import_llm_max_input_chars: int = Field(default=24000, ge=1000)
+    profile_import_llm_max_input_chars: int = Field(default=16000, ge=1000)
+    profile_import_llm_supervisor_enabled: bool = Field(default=True)
+    profile_import_llm_supervisor_max_input_chars: int = Field(default=8000, ge=1000)
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
     ollama_model: str = Field(default="qwen3.5:4b")
     ollama_timeout_seconds: float = Field(default=120.0, gt=0)

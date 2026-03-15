@@ -141,6 +141,44 @@ class ProfileImportExtractionResponse(StrictContractModel):
     skills: list[ProfileImportSkillItem] = Field(default_factory=list)
 
 
+class ProfileImportAuditScalarSuggestion(StrictContractModel):
+    """One supervisor suggestion for scalar field placement.
+
+    Attributes:
+        field_name: Source scalar field name.
+        action: Suggested action for the scalar value.
+        suggested_value: Optional replacement/moved value.
+        reason: Optional short reason for review logging.
+    """
+
+    field_name: Literal["full_name", "email", "phone", "location", "headline", "summary"]
+    action: Literal[
+        "keep",
+        "drop",
+        "replace",
+        "move_to_location",
+        "move_to_headline",
+        "move_to_summary",
+        "move_to_education",
+    ]
+    suggested_value: str | None = None
+    reason: str | None = None
+
+
+class ProfileImportAuditResponse(StrictContractModel):
+    """Structured supervisor output for profile import extraction.
+
+    Attributes:
+        scalar_suggestions: Scalar correction suggestions.
+        missing_signals: Important profile elements likely present but still missing.
+        warnings: Additional extraction quality warnings.
+    """
+
+    scalar_suggestions: list[ProfileImportAuditScalarSuggestion] = Field(default_factory=list)
+    missing_signals: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CvRewriteResponse(StrictContractModel):
     """Structured response for CV summary and bullet rewrites.
 
