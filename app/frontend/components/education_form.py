@@ -43,23 +43,23 @@ def _render_education_card(
     """Render one education entry card."""
 
     with ui.card().classes("w-full"):
-        ui.input("Institution", value=item.institution, on_change=lambda e, i=index: _set_institution(profile_state, i, e.value))
-        ui.input("Degree", value=item.degree, on_change=lambda e, i=index: _set_degree(profile_state, i, e.value))
+        ui.input("Institution", value=item.institution, on_change=lambda e, i=index: _set_institution(profile_state, i, e.value)).classes("w-full")
+        ui.input("Degree", value=item.degree, on_change=lambda e, i=index: _set_degree(profile_state, i, e.value)).classes("w-full")
         ui.input(
             "Field of Study",
             value=item.field_of_study or "",
             on_change=lambda e, i=index: _set_field_of_study(profile_state, i, e.value),
-        )
+        ).classes("w-full")
         ui.input(
             "Start Date (YYYY-MM-DD)",
             value=item.start_date or "",
             on_change=lambda e, i=index: _set_start_date(profile_state, i, e.value),
-        )
+        ).classes("w-full")
         ui.input(
             "End Date (YYYY-MM-DD)",
             value=item.end_date or "",
             on_change=lambda e, i=index: _set_end_date(profile_state, i, e.value),
-        )
+        ).classes("w-full")
         ui.button("Delete", on_click=lambda _, i=index: _delete_education(profile_state, i, refresh)).props("flat color=negative")
 
 

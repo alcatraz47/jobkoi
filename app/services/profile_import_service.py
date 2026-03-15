@@ -412,14 +412,9 @@ class ProfileImportService:
                     source_locator=page.url,
                 )
                 merged = _merge_imported_profile_drafts(base=merged, incoming=page_draft)
-                combined_text_parts.append(page.text)
+                combined_text_parts.append(f"Source URL: {page.url}\n{page.text}")
 
-            merged_text = "\n".join(combined_text_parts)
-            combined_draft = build_imported_profile_from_text(
-                text=merged_text,
-                source_locator=request.url,
-            )
-            merged = _merge_imported_profile_drafts(base=merged, incoming=combined_draft)
+            merged_text = "\n\n".join(combined_text_parts)
             merged, combined_extractor_name = self._merge_draft_with_llm_if_available(
                 draft=merged,
                 raw_text=merged_text,
@@ -482,14 +477,9 @@ class ProfileImportService:
                 source_locator=page.url,
             )
             merged = _merge_imported_profile_drafts(base=merged, incoming=page_draft)
-            combined_text_parts.append(page.text)
+            combined_text_parts.append(f"Source URL: {page.url}\n{page.text}")
 
-        merged_text = "\n".join(combined_text_parts)
-        combined_draft = build_imported_profile_from_text(
-            text=merged_text,
-            source_locator=request.url,
-        )
-        merged = _merge_imported_profile_drafts(base=merged, incoming=combined_draft)
+        merged_text = "\n\n".join(combined_text_parts)
         merged, combined_extractor_name = self._merge_draft_with_llm_if_available(
             draft=merged,
             raw_text=merged_text,

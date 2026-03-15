@@ -47,27 +47,27 @@ def _render_experience_card(
             "Company",
             value=item.company,
             on_change=lambda event, i=index: _set_company(profile_state, i, str(event.value)),
-        )
+        ).classes("w-full")
         ui.input(
             "Title",
             value=item.title,
             on_change=lambda event, i=index: _set_title(profile_state, i, str(event.value)),
-        )
+        ).classes("w-full")
         ui.input(
             "Start Date (YYYY-MM-DD)",
             value=item.start_date or "",
             on_change=lambda event, i=index: _set_start_date(profile_state, i, str(event.value)),
-        )
+        ).classes("w-full")
         ui.input(
             "End Date (YYYY-MM-DD)",
             value=item.end_date or "",
             on_change=lambda event, i=index: _set_end_date(profile_state, i, str(event.value)),
-        )
+        ).classes("w-full")
         ui.textarea(
             "Description",
             value=item.description or "",
             on_change=lambda event, i=index: _set_description(profile_state, i, str(event.value)),
-        ).props("autogrow")
+        ).props("autogrow").classes("w-full")
         ui.button(
             "Delete",
             on_click=lambda _, i=index: _delete_experience(profile_state, i, refresh),

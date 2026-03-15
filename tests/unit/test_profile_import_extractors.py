@@ -130,3 +130,44 @@ def test_extract_website_text_fallback_removes_scripts_and_keeps_structure() -> 
     assert "AI Engineer and Data Scientist" in text
     assert "ignore me" not in text
     assert "\n" in text
+
+
+
+def test_website_extractor_filters_low_signal_profile_pages() -> None:
+    """Website extractor should skip low-value pages like blog, CV, and project detail pages."""
+
+    pages = {
+        "https://portfolio.example.dev": (
+            "<a href='/experience'>Experience</a>"
+            "<a href='/skills'>Skills</a>"
+            "<a href='/blog'>Blog</a>"
+            "<a href='/cv'>CV</a>"
+            "<a href='/projects/ocr-demo'>Project</a>"
+            "<main>Home</main>"
+        ),
+        "https://portfolio.example.dev/experience": "<main>Experience page</main>",
+        "https://portfolio.example.dev/skills": "<main>Skills page</main>",
+        "https://portfolio.example.dev/blog": "<main>Blog page</main>",
+        "https://portfolio.example.dev/cv": "<main>CV page</main>",
+        "https://portfolio.example.dev/projects/ocr-demo": "<main>Project page</main>",
+    }
+
+    visited: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        visited.append(url)
+        return pages[url]
+
+    extractor = WebsiteImportExtractor(fetch_html=fake_fetch)
+    _name, results = extractor.extract_from_url(url="https://portfolio.example.dev", max_pages=5)
+
+    urls = [item.url for item in results]
+    assert "https://portfolio.example.dev" in urls
+    assert "https://portfolio.example.dev/experience" in urls
+    assert "https://portfolio.example.dev/skills" in urls
+    assert "https://portfolio.example.dev/blog" not in urls
+    assert "https://portfolio.example.dev/cv" not in urls
+    assert "https://portfolio.example.dev/projects/ocr-demo" not in urls
+    assert "https://portfolio.example.dev/blog" not in visited
+    assert "https://portfolio.example.dev/cv" not in visited
+    assert "https://portfolio.example.dev/projects/ocr-demo" not in visited

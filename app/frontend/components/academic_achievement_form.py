@@ -43,23 +43,23 @@ def _render_achievement_card(
     """Render one academic achievement card."""
 
     with ui.card().classes("w-full"):
-        ui.input("Title", value=item.title, on_change=lambda e, i=index: _set_title(profile_state, i, e.value))
+        ui.input("Title", value=item.title, on_change=lambda e, i=index: _set_title(profile_state, i, e.value)).classes("w-full")
         ui.input(
             "Type (award/publication/thesis/research/etc.)",
             value=item.achievement_type,
             on_change=lambda e, i=index: _set_type(profile_state, i, e.value),
-        )
+        ).classes("w-full")
         ui.input(
             "Institution",
             value=item.institution or "",
             on_change=lambda e, i=index: _set_institution(profile_state, i, e.value),
-        )
-        ui.input("Year", value=item.year or "", on_change=lambda e, i=index: _set_year(profile_state, i, e.value))
+        ).classes("w-full")
+        ui.input("Year", value=item.year or "", on_change=lambda e, i=index: _set_year(profile_state, i, e.value)).classes("w-full")
         ui.textarea(
             "Description",
             value=item.description or "",
             on_change=lambda e, i=index: _set_description(profile_state, i, e.value),
-        ).props("autogrow")
+        ).props("autogrow").classes("w-full")
         ui.button("Delete", on_click=lambda _, i=index: _delete_achievement(profile_state, i, refresh)).props("flat color=negative")
 
 

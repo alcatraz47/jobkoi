@@ -43,23 +43,23 @@ def _render_project_card(
     """Render one project item card."""
 
     with ui.card().classes("w-full"):
-        ui.input("Project Name", value=item.name, on_change=lambda e, i=index: _set_name(profile_state, i, e.value))
-        ui.input("Role", value=item.role or "", on_change=lambda e, i=index: _set_role(profile_state, i, e.value))
+        ui.input("Project Name", value=item.name, on_change=lambda e, i=index: _set_name(profile_state, i, e.value)).classes("w-full")
+        ui.input("Role", value=item.role or "", on_change=lambda e, i=index: _set_role(profile_state, i, e.value)).classes("w-full")
         ui.input(
             "Technologies",
             value=item.technologies or "",
             on_change=lambda e, i=index: _set_technologies(profile_state, i, e.value),
-        )
+        ).classes("w-full")
         ui.textarea(
             "Description",
             value=item.description or "",
             on_change=lambda e, i=index: _set_description(profile_state, i, e.value),
-        ).props("autogrow")
+        ).props("autogrow").classes("w-full")
         ui.textarea(
             "Outcome",
             value=item.outcome or "",
             on_change=lambda e, i=index: _set_outcome(profile_state, i, e.value),
-        ).props("autogrow")
+        ).props("autogrow").classes("w-full")
         ui.button("Delete", on_click=lambda _, i=index: _delete_project(profile_state, i, refresh)).props("flat color=negative")
 
 
