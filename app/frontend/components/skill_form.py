@@ -43,13 +43,13 @@ def _render_skill_card(
     """Render one skill item card."""
 
     with ui.card().classes("w-full"):
-        ui.input("Skill", value=item.skill_name, on_change=lambda e, i=index: _set_skill_name(profile_state, i, e.value))
-        ui.input("Level", value=item.level or "", on_change=lambda e, i=index: _set_level(profile_state, i, e.value))
+        ui.input("Skill", value=item.skill_name, on_change=lambda e, i=index: _set_skill_name(profile_state, i, e.value)).classes("w-full")
+        ui.input("Level", value=item.level or "", on_change=lambda e, i=index: _set_level(profile_state, i, e.value)).classes("w-full")
         ui.input(
             "Category",
             value=item.category or "",
             on_change=lambda e, i=index: _set_category(profile_state, i, e.value),
-        )
+        ).classes("w-full")
         ui.button("Delete", on_click=lambda _, i=index: _delete_skill(profile_state, i, refresh)).props("flat color=negative")
 
 

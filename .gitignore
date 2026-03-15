@@ -37,6 +37,7 @@ env/
 
 # Project runtime/output artifacts
 storage/
+evidence/
 
 # OS files
 .DS_Store

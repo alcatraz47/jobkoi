@@ -158,6 +158,8 @@ _ROLE_HINTS = (
     "specialist",
     "researcher",
     "intern",
+    "student",
+    "working student",
     "lead",
     "head",
     "director",
@@ -207,6 +209,12 @@ _PRESENT_STATUS_TOKENS = {"present", "current", "now", "heute"}
 _TRAILING_YEAR_IN_TITLE_PATTERN = re.compile(
     r"(?:\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s+)?"
     r"(?:19|20)\d{2}$",
+    re.IGNORECASE,
+)
+_TRAILING_EXPERIENCE_DATE_RANGE_PATTERN = re.compile(
+    r"(?:\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s+)?"
+    r"(?:19|20)\d{2}\s*(?:-|to|bis|–|—)\s*"
+    r"(?:(?:\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s+)?(?:19|20)\d{2}|present|current|heute|now)$",
     re.IGNORECASE,
 )
 
@@ -311,19 +319,21 @@ def flatten_imported_profile_to_fields(
             ("end_date", item.end_date),
             ("description", item.description),
         ):
-            if not value:
+            include_blank_title = field_name == "title" and not value and bool(item.company or item.description)
+            if not value and not include_blank_title:
                 continue
+            field_value = value or ""
             confidence = score_experience_field_confidence(
                 field_name=field_name,
-                value=value,
+                value=field_value,
                 description=item.description,
             )
             rows.append(
                 ImportFieldDraft(
                     field_path=f"experiences[{index}].{field_name}",
                     section_type="experience",
-                    extracted_value=value,
-                    suggested_value=value,
+                    extracted_value=field_value,
+                    suggested_value=field_value,
                     confidence_score=confidence,
                     source_locator=item.source_locator,
                     source_excerpt=item.source_excerpt or item.description or f"{item.title} at {item.company}",
@@ -481,6 +491,17 @@ def _extract_phone(text: str) -> str | None:
             continue
         if len(digits) == 13 and digits.startswith(("978", "979")):
             continue
+
+        context_start = max(0, match.start() - 32)
+        context_end = min(len(text), match.end() + 16)
+        context = text[context_start:context_end].lower()
+        previous_char = text[match.start() - 1] if match.start() > 0 else ""
+        next_char = text[match.end()] if match.end() < len(text) else ""
+        if "http" in context or "www." in context:
+            continue
+        if previous_char == "/" or (previous_char in {"/", "_", "-"} and next_char.isalpha()):
+            continue
+
         return candidate
 
     return None
@@ -489,26 +510,67 @@ def _extract_phone(text: str) -> str | None:
 def _extract_full_name(lines: list[str]) -> str | None:
     """Extract probable full name from header lines."""
 
-    for line in lines[:8]:
+    best_candidate: str | None = None
+    best_score = -1
+
+    for line in lines[:120]:
+        lowered = line.lower()
         if "@" in line:
             continue
         if any(char.isdigit() for char in line):
             continue
         if any(symbol in line for symbol in {"{", "}", "http", "©"}):
             continue
+        if _is_profile_label_line(line):
+            continue
+        if _contains_role_keyword(line):
+            continue
+        if any(token in lowered for token in ("engineering", "computer", "vision", "nlp", "llm", "vlm", "skill")):
+            continue
         if not _NAME_PATTERN.match(line):
             continue
 
         words = line.split()
-        if 2 <= len(words) <= 5:
-            return line
-    return None
+        if not 2 <= len(words) <= 5:
+            continue
+
+        score = 0
+        if 2 <= len(words) <= 4:
+            score += 2
+        if len(line) <= 30:
+            score += 1
+        if all(word[:1].isupper() for word in words if word.lower() not in {"von", "de", "da", "bin", "al", "el"}):
+            score += 1
+        if score > best_score:
+            best_candidate = line
+            best_score = score
+
+    return best_candidate
 
 
 def _extract_headline(lines: list[str], full_name: str | None) -> str | None:
     """Extract probable professional headline."""
 
-    for line in lines[:14]:
+    candidate_lines: list[str] = []
+    if full_name is not None:
+        for index, line in enumerate(lines):
+            if line != full_name:
+                continue
+            candidate_lines.extend(lines[index + 1 : index + 8])
+            break
+
+    if not candidate_lines:
+        for line in lines[:24]:
+            if _looks_like_section_heading(line):
+                break
+            candidate_lines.append(line)
+
+    fallback: str | None = None
+    seen: set[str] = set()
+    for line in candidate_lines:
+        if line in seen:
+            continue
+        seen.add(line)
         lowered = line.lower()
         if full_name and line == full_name:
             continue
@@ -516,7 +578,7 @@ def _extract_headline(lines: list[str], full_name: str | None) -> str | None:
             continue
         if _PHONE_PATTERN.search(line):
             continue
-        if _is_noise_heading_line(lowered):
+        if _is_noise_heading_line(lowered) or _is_profile_label_line(line):
             continue
         if any(alias in lowered for alias in _SECTION_ALIASES["experience"]):
             continue
@@ -524,9 +586,20 @@ def _extract_headline(lines: list[str], full_name: str | None) -> str | None:
             continue
         if _looks_like_education_line(line):
             continue
-        if 6 <= len(line) <= 110:
+        if line.endswith((".", "!", "?")):
+            continue
+        if _looks_like_narrative_line(line):
+            continue
+
+        word_count = len(line.split())
+        if not (2 <= word_count <= 12 and 6 <= len(line) <= 110):
+            continue
+        if _contains_role_keyword(line):
             return line
-    return None
+        if fallback is None:
+            fallback = line
+
+    return fallback
 
 
 def _is_location_candidate(value: str) -> bool:
@@ -578,11 +651,11 @@ def _extract_summary(lines: list[str]) -> str | None:
     """Extract a compact summary from top lines."""
 
     summary_lines: list[str] = []
-    for line in lines[1:20]:
+    for line in lines[1:24]:
         lowered = line.lower()
         if _looks_like_section_heading(line):
             break
-        if _is_noise_heading_line(lowered):
+        if _is_noise_heading_line(lowered) or _is_profile_label_line(line):
             continue
         if _EMAIL_PATTERN.search(line) or _PHONE_PATTERN.search(line):
             continue
@@ -595,8 +668,8 @@ def _extract_summary(lines: list[str]) -> str | None:
     if summary_lines:
         return " ".join(summary_lines)
 
-    for line in lines[:20]:
-        if 40 <= len(line) <= 220 and not _is_noise_heading_line(line.lower()):
+    for line in lines[:24]:
+        if 40 <= len(line) <= 220 and not _is_noise_heading_line(line.lower()) and not _is_profile_label_line(line):
             return line
     return None
 
@@ -701,17 +774,19 @@ def _append_section_buffer(
         return
 
     if section == "experience":
-        block_item = _parse_experience_block(lines, source_locator)
-        if block_item is not None:
-            experiences.append(block_item)
-            return
-
         parsed_any = False
-        for line in lines:
-            item = _parse_experience_line(line, source_locator)
-            if item is not None:
+        for block in _split_experience_section_blocks(lines):
+            block_item = _parse_experience_block(block, source_locator)
+            if block_item is not None:
                 parsed_any = True
-                experiences.append(item)
+                experiences.append(block_item)
+                continue
+
+            for line in block:
+                item = _parse_experience_line(line, source_locator)
+                if item is not None:
+                    parsed_any = True
+                    experiences.append(item)
 
         if not parsed_any:
             for line in lines:
@@ -752,54 +827,213 @@ def _append_section_buffer(
                     )
 
 
+def _split_experience_section_blocks(lines: list[str]) -> list[list[str]]:
+    """Split one experience section into probable per-role blocks."""
+
+    blocks: list[list[str]] = []
+    current: list[str] = []
+
+    for raw_line in lines:
+        line = normalize_text(raw_line)
+        if not line:
+            continue
+
+        if not current:
+            current = [line]
+            continue
+
+        if _looks_like_experience_block_start(line):
+            blocks.append(current)
+            current = [line]
+            continue
+
+        current.append(line)
+
+    if current:
+        blocks.append(current)
+
+    return blocks or ([lines] if lines else [])
+
+
+def _looks_like_experience_block_start(line: str) -> bool:
+    """Return whether one line likely starts a new experience entry."""
+
+    lowered = line.lower()
+    if lowered.startswith(("location:", "standort:", "tools/stack:", "stack:", "tech:", "technologies:")):
+        return False
+    if line.startswith(("-", "•", "*")):
+        return False
+    if len(line) > 140:
+        return False
+
+    has_year = _YEAR_PATTERN.search(line) is not None
+    has_end_marker = any(token in lowered for token in ("present", "current", "heute", "now"))
+    has_second_year = len(_YEAR_PATTERN.findall(line)) >= 2
+    return has_year and (has_end_marker or has_second_year)
+
+
 def _parse_experience_block(lines: list[str], source_locator: str | None) -> ImportedExperienceDraft | None:
     """Parse one multi-line experience block into one structured entry."""
 
-    for line in lines:
+    cleaned_lines = [normalize_text(line) for line in lines if normalize_text(line)]
+    if not cleaned_lines:
+        return None
+
+    joined = normalize_text(" ".join(cleaned_lines))
+    description = joined[:1200] if joined else None
+    start_date, end_date = _extract_date_range(joined)
+
+    if len(cleaned_lines) >= 2:
+        first = cleaned_lines[0]
+        second = cleaned_lines[1]
+
+        header_company = _extract_company_from_date_header(first)
+        role_title = _extract_role_only_title(second)
+        if header_company and role_title:
+            return ImportedExperienceDraft(
+                company=header_company,
+                title=role_title,
+                start_date=start_date,
+                end_date=end_date,
+                description=description,
+                source_locator=source_locator,
+                source_excerpt=description,
+            )
+
+        if header_company and second.startswith(("-", "•", "*")):
+            return ImportedExperienceDraft(
+                company=header_company,
+                title="",
+                start_date=start_date,
+                end_date=end_date,
+                description=description,
+                source_locator=source_locator,
+                source_excerpt=description,
+            )
+
+        if header_company and not second.startswith(("-", "•", "*")):
+            second_title = _clean_experience_title(
+                re.split(r"\b(?:location|standort)\b", second, maxsplit=1, flags=re.IGNORECASE)[0]
+            )
+            if second_title and _is_plausible_experience_title(second_title) and not _looks_like_narrative_line(second_title):
+                return ImportedExperienceDraft(
+                    company=header_company,
+                    title=second_title,
+                    start_date=start_date,
+                    end_date=end_date,
+                    description=description,
+                    source_locator=source_locator,
+                    source_excerpt=description,
+                )
+
+        first_title = _clean_experience_title(first)
+        second_company = _truncate_company_segment(second)
+        if start_date is not None and _is_plausible_experience_title(first_title) and _is_plausible_company_name(second_company):
+            return ImportedExperienceDraft(
+                company=second_company,
+                title=first_title,
+                start_date=start_date,
+                end_date=end_date,
+                description=description,
+                source_locator=source_locator,
+                source_excerpt=description,
+            )
+
+    for line in cleaned_lines:
         parsed = _parse_experience_line(line, source_locator)
         if parsed is not None:
-            description = normalize_text(" ".join(lines))
             return ImportedExperienceDraft(
                 company=parsed.company,
                 title=parsed.title,
                 start_date=parsed.start_date,
                 end_date=parsed.end_date,
-                description=description[:1200] if description else parsed.description,
+                description=description or parsed.description,
                 source_locator=source_locator,
-                source_excerpt=description[:1200] if description else (parsed.source_excerpt or parsed.description),
+                source_excerpt=description or parsed.source_excerpt or parsed.description,
             )
 
-    if len(lines) < 2:
+    header_company = _extract_company_from_date_header(cleaned_lines[0])
+    if header_company is not None:
+        return ImportedExperienceDraft(
+            company=header_company,
+            title="",
+            start_date=start_date,
+            end_date=end_date,
+            description=description,
+            source_locator=source_locator,
+            source_excerpt=description,
+        )
+
+    if len(cleaned_lines) < 2:
         return None
 
-    first = normalize_text(lines[0])
-    second = _truncate_company_segment(normalize_text(lines[1]))
-    joined = normalize_text(" ".join(lines))
-    start_date, end_date = _extract_date_range(joined)
-
+    first = _clean_experience_title(cleaned_lines[0])
+    second_raw = cleaned_lines[1]
+    second = _truncate_company_segment(second_raw)
+    if second_raw.startswith(("-", "•", "*")) or _looks_like_narrative_line(second):
+        return None
     if _is_plausible_experience_title(first) and _is_plausible_company_name(second):
         return ImportedExperienceDraft(
             company=second,
             title=first,
             start_date=start_date,
             end_date=end_date,
-            description=joined[:1200],
+            description=description,
             source_locator=source_locator,
-            source_excerpt=joined[:1200],
+            source_excerpt=description,
         )
 
-    if _is_plausible_company_name(first) and _is_plausible_experience_title(second):
+    if (
+        _is_plausible_company_name(first)
+        and _is_plausible_experience_title(second)
+        and _contains_role_keyword(second)
+        and not _contains_role_keyword(first)
+    ):
         return ImportedExperienceDraft(
             company=first,
             title=second,
             start_date=start_date,
             end_date=end_date,
-            description=joined[:1200],
+            description=description,
             source_locator=source_locator,
-            source_excerpt=joined[:1200],
+            source_excerpt=description,
         )
 
     return None
+
+
+def _extract_company_from_date_header(line: str) -> str | None:
+    """Extract company name from a header line containing a date range."""
+
+    candidate = re.sub(r"\([^)]*(?:19|20)\d{2}[^)]*\)", "", line).strip(" -|,;()")
+    if candidate == line:
+        match = _DATE_RANGE_PATTERN.search(line)
+        if match is None:
+            return None
+        candidate = line[: match.start()].strip(" -|,;()")
+
+    candidate = _truncate_company_segment(normalize_text(candidate))
+    if not candidate or not _is_plausible_company_name(candidate):
+        return None
+    if _contains_role_keyword(candidate) and _company_hint_score(candidate) == 0:
+        return None
+    return candidate
+
+
+def _extract_role_only_title(line: str) -> str | None:
+    """Extract title from a line that starts with a role marker."""
+
+    match = re.search(r"\brole\s*[:\-]\s*(?P<title>.+)$", line, flags=re.IGNORECASE)
+    if match is None:
+        return None
+
+    title = normalize_text(match.group("title"))
+    title = re.split(r"\b(?:location|standort)\b", title, maxsplit=1, flags=re.IGNORECASE)[0]
+    title = re.split(r"\s+[-|]\s+", title, maxsplit=1)[0]
+    title = _clean_experience_title(title)
+    if not title or not _is_plausible_experience_title(title):
+        return None
+    return title
 
 
 def _parse_education_block(lines: list[str], source_locator: str | None) -> ImportedEducationDraft | None:
@@ -885,6 +1119,58 @@ def _detect_section_and_remainder(line: str) -> tuple[str, str]:
                 return section, remainder
 
     return "", ""
+
+
+def _is_profile_label_line(line: str) -> bool:
+    """Return whether one line is likely navigation, UI, or section label noise."""
+
+    lowered = normalize_text(line).lower()
+    if not lowered:
+        return False
+    if lowered in {
+        "/",
+        "home",
+        "projects",
+        "experience",
+        "skills",
+        "publications",
+        "publication",
+        "blog",
+        "cv",
+        "follow",
+        "github",
+        "linkedin",
+        "email",
+        "overview",
+        "impact",
+        "tech",
+        "tooling",
+        "capstone",
+        "objective",
+        "profile",
+        "summary",
+        "about",
+        "contact",
+    }:
+        return True
+    if lowered.startswith((
+        "linkedin",
+        "github",
+        "follow",
+        "download cv",
+        "skills at a glance",
+        "technical skills",
+        "soft skills",
+        "language skills",
+        "what i did",
+        "role:",
+        "location:",
+        "tools/stack:",
+        "stack:",
+        "tech:",
+    )):
+        return True
+    return False
 
 
 def _is_noise_heading_line(lowered_line: str) -> bool:
@@ -992,6 +1278,8 @@ def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExp
     normalized = normalize_text(line)
     if not normalized or len(normalized) > 400:
         return None
+    if normalized.startswith(("-", "•", "*")):
+        return None
 
     title = ""
     company = ""
@@ -1069,6 +1357,7 @@ def _clean_experience_title(value: str) -> str:
     """Remove trailing year/date fragments from experience title candidates."""
 
     cleaned = normalize_text(value)
+    cleaned = _TRAILING_EXPERIENCE_DATE_RANGE_PATTERN.sub("", cleaned).strip(" -|,;")
     cleaned = _TRAILING_YEAR_IN_TITLE_PATTERN.sub("", cleaned).strip(" -|,;")
     return normalize_text(cleaned)
 
@@ -1422,20 +1711,35 @@ def _is_valid_skill_token(token: str) -> bool:
         "experience",
         "skills",
         "publications",
+        "publication",
         "blog",
         "cv",
         "linkedin",
         "toggle menu",
+        "follow",
+        "email",
+        "germany",
+        "overview",
+        "impact",
+        "tech",
+        "tooling",
+        "capstone",
     }:
         return False
 
-    if lowered.startswith("view "):
+    if lowered.startswith(("view ", "download cv", "skills at a glance", "what i did")):
         return False
 
-    if any(part in lowered for part in ("currently", "working", "selected", "follow", "portfolio")):
+    if token.startswith(("-", "•", "*", "·")):
+        return False
+
+    if any(part in lowered for part in ("currently", "working", "selected", "follow", "portfolio", "at a glance")):
         return False
 
     if "." in token:
+        return False
+
+    if len(token.split()) == 1 and token == lowered and lowered not in _SKILL_KEYWORDS and lowered not in {"mlops", "ci/cd"}:
         return False
 
     word_count = len(token.split())

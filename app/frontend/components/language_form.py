@@ -43,12 +43,12 @@ def _render_language_card(
     """Render one language item card."""
 
     with ui.card().classes("w-full"):
-        ui.input("Language", value=item.language, on_change=lambda e, i=index: _set_language(profile_state, i, e.value))
+        ui.input("Language", value=item.language, on_change=lambda e, i=index: _set_language(profile_state, i, e.value)).classes("w-full")
         ui.input(
             "Proficiency",
             value=item.proficiency,
             on_change=lambda e, i=index: _set_proficiency(profile_state, i, e.value),
-        )
+        ).classes("w-full")
         ui.button("Delete", on_click=lambda _, i=index: _delete_language(profile_state, i, refresh)).props("flat color=negative")
 
 

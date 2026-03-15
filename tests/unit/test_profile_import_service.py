@@ -513,3 +513,61 @@ def test_service_supervisor_reassigns_education_like_location_to_education(
         for item in run.fields
         if item.field_path.endswith(".degree")
     )
+
+
+def test_service_website_import_keeps_multiple_experience_entries_for_review(
+    db_session: Session,
+    tmp_path,
+) -> None:
+    """Website import should preserve separate experience entries and blank-title review rows."""
+
+    class _StructuredWebsiteExtractor:
+        """Deterministic website extractor with multi-entry experience page."""
+
+        def extract_from_url(self, *, url: str, max_pages: int) -> tuple[str, list[WebsitePageResult]]:
+            _ = (url, max_pages)
+            return (
+                "fake_website",
+                [
+                    WebsitePageResult(
+                        url="https://portfolio.example.dev",
+                        text=(
+                            "Md Mahmudul Haque\n"
+                            "AI Engineer • Computer Vision • NLP • LLMs/VLMs\n"
+                            "arfan@example.com\n"
+                        ),
+                    ),
+                    WebsitePageResult(
+                        url="https://portfolio.example.dev/experience/",
+                        text=(
+                            "Experience\n"
+                            "HT Ventures (January 2025-Present)\n"
+                            "Role: AI Engineer (Remote)\n"
+                            "- Built customer support copilots.\n"
+                            "Fraunhofer IML (May 2025-Present)\n"
+                            "- Built railway computer vision systems.\n"
+                            "Henkel (Apr 2024-Apr 2025)\n"
+                            "- Built sustainability NLP workflows.\n"
+                        ),
+                    ),
+                ],
+            )
+
+    service = ProfileImportService(
+        db_session,
+        cv_extractor=_FakeCvExtractor(),
+        website_extractor=_StructuredWebsiteExtractor(),
+        import_storage_dir=tmp_path,
+    )
+
+    run = service.import_website(
+        WebsiteImportRequest(url="https://portfolio.example.dev", max_pages=2)
+    )
+
+    field_values = {(item.field_path, item.suggested_value) for item in run.fields}
+    assert ("experiences[0].company", "HT Ventures") in field_values
+    assert ("experiences[0].title", "AI Engineer (Remote)") in field_values
+    assert ("experiences[1].company", "Fraunhofer IML") in field_values
+    assert ("experiences[1].title", "") in field_values
+    assert ("experiences[2].company", "Henkel") in field_values
+    assert ("experiences[2].title", "") in field_values

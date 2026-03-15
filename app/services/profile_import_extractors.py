@@ -65,6 +65,27 @@ _BLOCK_BREAK_TAGS: set[str] = {
 }
 
 _SUPPRESSED_TAGS: set[str] = {"script", "style", "noscript", "svg"}
+_PROFILE_URL_ALLOW_MARKERS: tuple[str, ...] = (
+    "experience",
+    "work",
+    "career",
+    "skills",
+    "about",
+    "contact",
+    "education",
+)
+_PROFILE_URL_BLOCK_MARKERS: tuple[str, ...] = (
+    "blog",
+    "post",
+    "article",
+    "publication",
+    "publications",
+    "project",
+    "projects",
+    "cv",
+    "resume",
+    "download",
+)
 
 
 class ProfileImportExtractionError(Exception):
@@ -196,10 +217,12 @@ class WebsiteImportExtractor:
                 continue
 
             text = _extract_website_text(html=html, url=current_url)
-            if text:
+            if text and _should_keep_profile_page(current_url):
                 pages.append(WebsitePageResult(url=current_url, text=text))
 
             for link in _extract_same_domain_links(html=html, base_url=current_url, domain=domain):
+                if not _should_keep_profile_page(link):
+                    continue
                 if link in visited or link in queue:
                     continue
                 if len(queue) + len(pages) >= page_limit * 3:
@@ -514,6 +537,30 @@ def _extract_same_domain_links(*, html: str, base_url: str, domain: str) -> list
         seen.add(absolute)
         links.append(absolute)
     return links
+
+
+def _should_keep_profile_page(url: str) -> bool:
+    """Return whether one same-domain URL is likely useful for profile import.
+
+    Args:
+        url: Absolute URL candidate.
+
+    Returns:
+        True when URL likely contains profile-relevant content.
+    """
+
+    parsed = urlparse(url)
+    path = parsed.path.strip("/").lower()
+    if not path:
+        return True
+
+    segments = [segment for segment in path.split("/") if segment]
+    if any(any(marker in segment for marker in _PROFILE_URL_BLOCK_MARKERS) for segment in segments):
+        return False
+    if any(any(marker in segment for marker in _PROFILE_URL_ALLOW_MARKERS) for segment in segments):
+        return True
+
+    return len(segments) <= 1
 
 
 def _normalize_url(url: str) -> str:

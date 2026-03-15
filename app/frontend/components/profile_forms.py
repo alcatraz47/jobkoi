@@ -63,32 +63,32 @@ def _render_personal_information(profile_state: ProfileState) -> None:
                 "Full Name",
                 value=profile_state.draft.full_name,
                 on_change=lambda event: _set_full_name(profile_state, str(event.value)),
-            )
+            ).classes("w-full")
             ui.input(
                 "Email",
                 value=profile_state.draft.email,
                 on_change=lambda event: _set_email(profile_state, str(event.value)),
-            )
+            ).classes("w-full")
             ui.input(
                 "Phone",
                 value=profile_state.draft.phone or "",
                 on_change=lambda event: _set_phone(profile_state, str(event.value)),
-            )
+            ).classes("w-full")
             ui.input(
                 "Location",
                 value=profile_state.draft.location or "",
                 on_change=lambda event: _set_location(profile_state, str(event.value)),
-            )
+            ).classes("w-full")
             ui.input(
                 "Professional Headline",
                 value=profile_state.draft.headline or "",
                 on_change=lambda event: _set_headline(profile_state, str(event.value)),
-            ).classes("col-span-2")
+            ).classes("w-full col-span-2")
             ui.textarea(
                 "Professional Summary",
                 value=profile_state.draft.summary or "",
                 on_change=lambda event: _set_summary(profile_state, str(event.value)),
-            ).props("autogrow").classes("col-span-2")
+            ).props("autogrow").classes("w-full col-span-2")
 
 
 def _render_job_preference_form(profile_state: ProfileState) -> None:
@@ -134,7 +134,7 @@ def _render_job_preference_card(
                 i,
                 str(event.value),
             ),
-        )
+        ).classes("w-full")
         ui.input(
             "Preferred Locations",
             value=item.preferred_locations or "",
@@ -143,7 +143,7 @@ def _render_job_preference_card(
                 i,
                 str(event.value),
             ),
-        )
+        ).classes("w-full")
         ui.select(
             options=["remote", "hybrid", "onsite", "flexible"],
             value=item.work_mode or "",
@@ -153,7 +153,7 @@ def _render_job_preference_card(
                 i,
                 str(event.value),
             ),
-        )
+        ).classes("w-full")
         ui.button(
             "Delete",
             on_click=lambda _, i=index: _delete_job_preference(profile_state, i, refresh),
