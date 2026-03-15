@@ -308,6 +308,130 @@ class ProfileImportService:
 
         return source, source_path
 
+    def enqueue_website_import(self, request: WebsiteImportRequest) -> ProfileImportRunResponse:
+        """Create one queued website import run for background processing.
+
+        Args:
+            request: Website import request payload.
+
+        Returns:
+            Queued import run response.
+        """
+
+        source = self._repository.create_source(
+            ImportSourcePayload(
+                source_type="portfolio_website",
+                source_label=request.url,
+                file_name=None,
+                file_path=None,
+                source_url=request.url,
+                checksum_sha256=None,
+            )
+        )
+
+        queued_payload = ImportRunPayload(
+            extractor_name="queued",
+            extractor_version=None,
+            status="queued",
+            detected_language=None,
+            raw_text="",
+            structured_payload_json=json.dumps(
+                {
+                    "url": request.url,
+                    "max_pages": int(request.max_pages),
+                },
+                ensure_ascii=True,
+            ),
+            fields=[],
+            conflicts=[],
+        )
+        run = self._repository.create_run(source.id, queued_payload)
+        self._session.commit()
+        return self._to_run_response(run)
+
+    def process_queued_website_run(self, run_id: str) -> None:
+        """Process one queued website run and replace it with extracted results.
+
+        Args:
+            run_id: Import run identifier.
+        """
+
+        run = self._repository.get_run(run_id)
+        if run is None:
+            return
+        if run.status not in {"queued", "failed"}:
+            return
+
+        source = run.source
+        url = source.source_url
+        if not url:
+            self._repository.set_run_status(run, "failed")
+            self._session.commit()
+            return
+
+        max_pages = 3
+        try:
+            payload = json.loads(run.structured_payload_json or "{}")
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            try:
+                max_pages = int(payload.get("max_pages", 3))
+            except Exception:
+                max_pages = 3
+
+        request = WebsiteImportRequest(url=url, max_pages=max(1, min(max_pages, 10)))
+
+        self._repository.set_run_status(run, "running")
+        self._session.commit()
+
+        try:
+            extractor_name, pages = self._website_extractor.extract_from_url(
+                url=request.url,
+                max_pages=request.max_pages,
+            )
+
+            merged = ImportedProfileDraft()
+            combined_text_parts: list[str] = []
+            for page in pages:
+                page_draft = build_imported_profile_from_text(
+                    text=page.text,
+                    source_locator=page.url,
+                )
+                merged = _merge_imported_profile_drafts(base=merged, incoming=page_draft)
+                combined_text_parts.append(page.text)
+
+            merged_text = "\n".join(combined_text_parts)
+            combined_draft = build_imported_profile_from_text(
+                text=merged_text,
+                source_locator=request.url,
+            )
+            merged = _merge_imported_profile_drafts(base=merged, incoming=combined_draft)
+            merged, combined_extractor_name = self._merge_draft_with_llm_if_available(
+                draft=merged,
+                raw_text=merged_text,
+                source_type="portfolio_website",
+                source_label=request.url,
+                source_locator=request.url,
+                extractor_name=extractor_name,
+            )
+            run_payload = self._build_run_payload_from_draft(
+                draft=merged,
+                raw_text=merged_text,
+                extractor_name=combined_extractor_name,
+                extractor_version=None,
+            )
+
+            self._repository.replace_run_extraction_result(run=run, payload=run_payload)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            failed_run = self._repository.get_run(run_id)
+            if failed_run is None:
+                return
+            self._repository.set_run_status(failed_run, "failed")
+            self._session.commit()
+
     def import_website(self, request: WebsiteImportRequest) -> ProfileImportRunResponse:
         """Create a website-based import run from public URL extraction.
 

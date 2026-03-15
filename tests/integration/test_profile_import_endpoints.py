@@ -384,3 +384,50 @@ def test_cv_import_async_endpoint_queues_and_processes_run(
     get_response = client.get(f"/api/v1/profile-imports/{run_id}")
     assert get_response.status_code == 200
     assert get_response.json()["status"] in {"queued", "running", "extracted"}
+
+
+
+def test_website_import_async_endpoint_queues_and_processes_run(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Async website endpoint should return queued run and eventually produce extraction output."""
+
+    def fake_website_extract(
+        self,
+        *,
+        url: str,
+        max_pages: int,
+    ) -> tuple[str, list[WebsitePageResult]]:
+        _ = (self, url, max_pages)
+        return (
+            "fake_website",
+            [
+                WebsitePageResult(
+                    url=url,
+                    text=(
+                        "Arfan Example builds backend systems with Python and FastAPI for logistics workflows. "
+                        "He designs data pipelines and deployment automation across production environments."
+                    ),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        "app.services.profile_import_extractors.WebsiteImportExtractor.extract_from_url",
+        fake_website_extract,
+    )
+
+    import_response = client.post(
+        "/api/v1/profile-imports/website/async",
+        json={"url": "https://portfolio.example.dev", "max_pages": 2},
+    )
+    assert import_response.status_code == 202
+
+    queued = import_response.json()
+    run_id = queued["id"]
+    assert queued["status"] == "queued"
+
+    get_response = client.get(f"/api/v1/profile-imports/{run_id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] in {"queued", "running", "extracted"}

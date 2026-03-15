@@ -49,6 +49,27 @@ def _process_queued_cv_import_run(run_id: str) -> None:
         session.close()
 
 
+def _process_queued_website_import_run(run_id: str) -> None:
+    """Process one queued website import run in a background task.
+
+    Args:
+        run_id: Import run identifier.
+    """
+
+    session = get_session_factory()()
+    try:
+        service = ProfileImportService(session)
+        service.process_queued_website_run(run_id)
+    except Exception:
+        logger.exception("Queued website import processing failed for run_id=%s", run_id)
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
 @router.post("/cv/async", response_model=ProfileImportRunResponse, status_code=status.HTTP_202_ACCEPTED)
 async def import_cv_async(
     background_tasks: BackgroundTasks,
@@ -116,6 +137,36 @@ async def import_cv(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     except ProfileImportExtractionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@router.post("/website/async", response_model=ProfileImportRunResponse, status_code=status.HTTP_202_ACCEPTED)
+def import_website_async(
+    request: WebsiteImportRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> ProfileImportRunResponse:
+    """Queue a profile import run from a portfolio website URL.
+
+    Args:
+        request: Website import request payload.
+        background_tasks: FastAPI background task registry.
+        session: Database session dependency.
+
+    Returns:
+        Queued import run response.
+
+    Raises:
+        HTTPException: If input validation or extraction bootstrap fails.
+    """
+
+    service = ProfileImportService(session)
+    try:
+        run_response = service.enqueue_website_import(request)
+    except ProfileImportExtractionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+    background_tasks.add_task(_process_queued_website_import_run, run_response.id)
+    return run_response
 
 
 @router.post("/website", response_model=ProfileImportRunResponse, status_code=status.HTTP_201_CREATED)

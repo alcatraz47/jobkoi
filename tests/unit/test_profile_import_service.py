@@ -387,3 +387,45 @@ def test_service_website_import_merges_supported_llm_fields_only(
     assert run.extractor_name.endswith("+llm")
     values = [field.suggested_value for field in run.fields if field.suggested_value is not None]
     assert "Invented Skill" not in values
+
+
+
+def test_service_enqueue_and_process_website_import(db_session: Session, tmp_path) -> None:
+    """Queued website import should transition from queued to extracted."""
+
+    class _LongWebsiteExtractor:
+        """Deterministic website extractor for queue processing tests."""
+
+        def extract_from_url(self, *, url: str, max_pages: int) -> tuple[str, list[WebsitePageResult]]:
+            _ = (url, max_pages)
+            return (
+                "fake_website",
+                [
+                    WebsitePageResult(
+                        url=url,
+                        text=(
+                            "Arfan Example builds backend systems with Python and FastAPI for logistics workflows. "
+                            "He designs data pipelines and deployment automation across production environments."
+                        ),
+                    )
+                ],
+            )
+
+    service = ProfileImportService(
+        db_session,
+        cv_extractor=_FakeCvExtractor(),
+        website_extractor=_LongWebsiteExtractor(),
+        import_storage_dir=tmp_path,
+    )
+
+    queued = service.enqueue_website_import(
+        WebsiteImportRequest(url="https://portfolio.example.dev", max_pages=2)
+    )
+    assert queued.status == "queued"
+    assert queued.fields == []
+
+    service.process_queued_website_run(queued.id)
+
+    processed = service.get_run(queued.id)
+    assert processed.status == "extracted"
+    assert processed.fields

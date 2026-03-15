@@ -41,7 +41,7 @@ class ProfileImportApi:
     def import_website(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create import run from website URL request payload."""
 
-        return self._client.post_json("/profile-imports/website", payload)
+        return self._client.post_json("/profile-imports/website/async", payload)
 
     def list_runs(self) -> dict[str, Any]:
         """List profile import runs."""
