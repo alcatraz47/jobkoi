@@ -149,3 +149,80 @@ def test_builder_avoids_false_inline_experience_matches_from_word_fragments() ->
 
     assert draft.experiences == []
 
+
+
+def test_builder_does_not_map_education_line_to_location_and_uses_contact_location() -> None:
+    """Builder should map contact-line city as location and avoid education scalar leakage."""
+
+    text_input = """
+    Md Mahmudul Haque
+    +49 176 32925096 | Dortmund, Germany
+    Master of Data Science, Carl von Ossietzky University Oldenburg Expected: Summer 2027
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+
+    assert draft.location == "Dortmund, Germany"
+    assert draft.location != "Master of Data Science, Carl von Ossietzky University Oldenburg Expected: Summer 2027"
+
+
+def test_builder_extracts_inline_education_from_degree_comma_line() -> None:
+    """Builder should parse comma-formatted degree/institution lines without education heading."""
+
+    text_input = """
+    Md Mahmudul Haque
+    AI Engineer
+    Master of Data Science, Carl von Ossietzky University Oldenburg Expected: Summer 2027
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+
+    assert draft.educations
+    assert draft.educations[0].degree == "Master of Data Science"
+    assert draft.educations[0].institution == "Carl von Ossietzky University Oldenburg"
+    assert draft.headline == "AI Engineer"
+
+
+def test_builder_does_not_use_present_as_company_value() -> None:
+    """Experience parser should not map temporal status tokens into company fields."""
+
+    text_input = """
+    Experience
+    Data Science Working Student 2025 - Present Fraunhofer IML
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+
+    assert draft.experiences
+    assert draft.experiences[0].company == "Fraunhofer IML"
+    assert draft.experiences[0].title == "Data Science Working Student"
+
+
+def test_builder_cleans_present_experience_title_and_company_address() -> None:
+    """Builder should clean temporal suffixes and address tails in experience tuples."""
+
+    text_input = """
+    Experience
+    Data Science Working Student May 2025 - Present Fraunhofer IML Joseph-von-Fraunhofer-Str. 2-4, 44227 Dortmund, Germany
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+
+    assert draft.experiences
+    assert draft.experiences[0].title == "Data Science Working Student"
+    assert draft.experiences[0].company == "Fraunhofer IML"
+
+
+def test_builder_parses_role_pattern_into_company_and_title() -> None:
+    """Builder should parse lines with explicit role markers."""
+
+    text_input = """
+    Experience
+    HT Ventures (January 2025-Present) Role: AI Engineer (Remote) Location: Hamburg, Germany - Architected support copilot workflows.
+    """
+
+    draft = build_imported_profile_from_text(text=text_input, source_locator="resume.pdf")
+
+    assert draft.experiences
+    assert draft.experiences[0].company == "HT Ventures"
+    assert draft.experiences[0].title == "AI Engineer (Remote)"

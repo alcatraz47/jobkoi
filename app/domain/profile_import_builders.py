@@ -41,6 +41,19 @@ _COMPANY_CUTOFF_MARKERS = (
     " leading ",
     " currently ",
 )
+_ADDRESS_TOKENS = (
+    "str.",
+    "straße",
+    "street",
+    "st.",
+    "road",
+    "rd.",
+    "avenue",
+    "ave",
+    "platz",
+    "allee",
+    "weg",
+)
 
 _SECTION_ALIASES: dict[str, tuple[str, ...]] = {
     "experience": (
@@ -93,6 +106,26 @@ _DEGREE_MARKERS = (
     "diplom",
     "degree",
     "mba",
+)
+
+_EDUCATION_MARKERS = (
+    "university",
+    "college",
+    "institute",
+    "school",
+    "faculty",
+    "expected",
+    "graduation",
+    "semester",
+    "thesis",
+    "dissertation",
+    "bachelor",
+    "master",
+    "phd",
+    "msc",
+    "bsc",
+    "mba",
+    "diplom",
 )
 
 _COMPANY_HINTS = (
@@ -170,6 +203,13 @@ _DATE_RANGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_PRESENT_STATUS_TOKENS = {"present", "current", "now", "heute"}
+_TRAILING_YEAR_IN_TITLE_PATTERN = re.compile(
+    r"(?:\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\s+)?"
+    r"(?:19|20)\d{2}$",
+    re.IGNORECASE,
+)
+
 
 def build_imported_profile_from_text(
     *,
@@ -203,6 +243,10 @@ def build_imported_profile_from_text(
 
     if not experiences:
         experiences, inline_unmapped = _extract_inline_experiences(lines, source_locator)
+        unmapped.extend(inline_unmapped)
+
+    if not educations:
+        educations, inline_unmapped = _extract_inline_educations(lines, source_locator)
         unmapped.extend(inline_unmapped)
 
     return ImportedProfileDraft(
@@ -394,17 +438,25 @@ def _extract_location(
         lowered = line.lower()
         if not line or line == full_name or line == headline:
             continue
-        if _EMAIL_PATTERN.search(line) or _PHONE_PATTERN.search(line):
-            continue
         if _looks_like_section_heading(line) or _is_noise_heading_line(lowered):
             continue
         if len(line) > 90:
             continue
         if "http" in lowered or "linkedin" in lowered or "github" in lowered:
             continue
+        if _looks_like_education_line(line):
+            continue
 
-        # Prefer city-country patterns: "Dortmund, Germany".
-        if "," in line and not any(char in line for char in {"@", "#", "{"}):
+        if _PHONE_PATTERN.search(line):
+            contact_location = _extract_location_from_contact_line(line)
+            if contact_location:
+                return contact_location
+            continue
+
+        if _EMAIL_PATTERN.search(line):
+            continue
+
+        if _is_location_candidate(line):
             return line
 
     return None
@@ -462,13 +514,64 @@ def _extract_headline(lines: list[str], full_name: str | None) -> str | None:
             continue
         if "@" in line or _EMAIL_PATTERN.search(line):
             continue
+        if _PHONE_PATTERN.search(line):
+            continue
         if _is_noise_heading_line(lowered):
             continue
         if any(alias in lowered for alias in _SECTION_ALIASES["experience"]):
             continue
+        if _is_location_candidate(line):
+            continue
+        if _looks_like_education_line(line):
+            continue
         if 6 <= len(line) <= 110:
             return line
     return None
+
+
+def _is_location_candidate(value: str) -> bool:
+    """Return whether one line likely encodes location information."""
+
+    lowered = value.lower()
+    if "@" in value or "http" in lowered:
+        return False
+    if _looks_like_education_line(value):
+        return False
+
+    digits = sum(1 for char in value if char.isdigit())
+    if digits > 5:
+        return False
+
+    if "," not in value:
+        return False
+
+    if len(value.split()) > 8:
+        return False
+
+    return True
+
+
+def _extract_location_from_contact_line(line: str) -> str | None:
+    """Extract location segment from contact bundle line when present."""
+
+    segments = [normalize_text(part) for part in re.split(r"[|•]", line)]
+    for segment in segments:
+        if not segment:
+            continue
+        if _PHONE_PATTERN.search(segment) or _EMAIL_PATTERN.search(segment):
+            continue
+        if _is_location_candidate(segment):
+            return segment
+
+    return None
+
+
+def _looks_like_education_line(value: str) -> bool:
+    """Return whether one line likely belongs to education data."""
+
+    collapsed = value.lower().replace(".", "")
+    markers = tuple(marker.replace(".", "") for marker in _EDUCATION_MARKERS)
+    return any(re.search(rf"\b{re.escape(marker)}\b", collapsed) for marker in markers)
 
 
 def _extract_summary(lines: list[str]) -> str | None:
@@ -843,6 +946,46 @@ def _extract_inline_experiences(
     return items, unmapped
 
 
+def _extract_inline_educations(
+    lines: list[str],
+    source_locator: str | None,
+) -> tuple[list[ImportedEducationDraft], list[ImportedUnmappedCandidate]]:
+    """Extract education-like entries from unsectioned lines."""
+
+    items: list[ImportedEducationDraft] = []
+    unmapped: list[ImportedUnmappedCandidate] = []
+    seen: set[tuple[str, str]] = set()
+
+    for line in lines:
+        if _looks_like_section_heading(line):
+            continue
+        if _is_noise_heading_line(line.lower()):
+            continue
+        if not _looks_like_education_line(line):
+            continue
+
+        item = _parse_education_line(line, source_locator)
+        if item is None:
+            if _should_track_unmapped_line(line):
+                unmapped.append(
+                    ImportedUnmappedCandidate(
+                        text=line,
+                        section_hint="education",
+                        reason="inline_education_parse_failed",
+                        source_locator=source_locator,
+                    )
+                )
+            continue
+
+        key = (item.institution.lower(), item.degree.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+
+    return items, unmapped
+
+
 def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExperienceDraft | None:
     """Parse one experience line into structured fields."""
 
@@ -853,9 +996,13 @@ def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExp
     title = ""
     company = ""
 
+    parsed_role = _parse_experience_role_pattern_line(normalized)
+    if parsed_role is not None:
+        title, company = parsed_role
+
     lower_line = normalized.lower()
     separator = next((value for value in _EXPERIENCE_SEPARATORS if value in lower_line), None)
-    if separator is not None:
+    if separator is not None and (not title or not company):
         split_pattern = re.compile(re.escape(separator), re.IGNORECASE)
         segments = split_pattern.split(normalized, maxsplit=1)
         if len(segments) == 2:
@@ -866,6 +1013,13 @@ def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExp
         parsed_dash = _parse_experience_dash_or_pipe_line(normalized)
         if parsed_dash is not None:
             title, company = parsed_dash
+
+    title = _clean_experience_title(title)
+    company = _strip_leading_present_status(company)
+    if _is_present_status(company):
+        company = _extract_company_after_present(normalized) or company
+
+    title, company = _rebalance_experience_fields(title=title, company=company)
 
     if not title or not company:
         return None
@@ -888,6 +1042,68 @@ def _parse_experience_line(line: str, source_locator: str | None) -> ImportedExp
     )
 
 
+def _parse_experience_role_pattern_line(line: str) -> tuple[str, str] | None:
+    """Parse lines with explicit ``Role:`` patterns into title/company tuple."""
+
+    pattern = re.compile(
+        r"^(?P<company>.+?)\s*(?:\([^)]*\))?\s+role\s*[:\-]\s*(?P<title>.+)$",
+        flags=re.IGNORECASE,
+    )
+    match = pattern.search(line)
+    if match is None:
+        return None
+
+    company = _truncate_company_segment(normalize_text(match.group("company")))
+    title = normalize_text(match.group("title"))
+    title = re.split(r"\b(?:location|standort)\b", title, maxsplit=1, flags=re.IGNORECASE)[0]
+    title = re.split(r"\s+[-|]\s+", title, maxsplit=1)[0]
+    title = normalize_text(title)
+
+    if not title or not company:
+        return None
+
+    return title, company
+
+
+def _clean_experience_title(value: str) -> str:
+    """Remove trailing year/date fragments from experience title candidates."""
+
+    cleaned = normalize_text(value)
+    cleaned = _TRAILING_YEAR_IN_TITLE_PATTERN.sub("", cleaned).strip(" -|,;")
+    return normalize_text(cleaned)
+
+
+def _is_present_status(value: str) -> bool:
+    """Return whether one value is only a present/current status token."""
+
+    lowered = normalize_text(value).lower()
+    return lowered in _PRESENT_STATUS_TOKENS
+
+
+def _strip_leading_present_status(value: str) -> str:
+    """Remove leading temporal status tokens from company candidates."""
+
+    cleaned = normalize_text(value)
+    cleaned = re.sub(r"^(?:present|current|heute|now)\b[:,-]?\s*", "", cleaned, flags=re.IGNORECASE)
+    return normalize_text(cleaned)
+
+
+def _extract_company_after_present(line: str) -> str | None:
+    """Extract probable company text that follows present/current status."""
+
+    match = re.search(r"\b(?:present|current|heute|now)\b\s+(?P<company>.+)$", line, flags=re.IGNORECASE)
+    if match is None:
+        return None
+
+    candidate = _truncate_company_segment(normalize_text(match.group("company")))
+    candidate = _strip_leading_present_status(candidate)
+    if not candidate:
+        return None
+    if _is_present_status(candidate):
+        return None
+    return candidate
+
+
 def _parse_experience_dash_or_pipe_line(line: str) -> tuple[str, str] | None:
     """Parse dash/pipe separated line into title/company tuple."""
 
@@ -896,8 +1112,8 @@ def _parse_experience_dash_or_pipe_line(line: str) -> tuple[str, str] | None:
             continue
 
         left_raw, right_raw = line.split(separator, maxsplit=1)
-        left = _truncate_company_segment(normalize_text(left_raw))
-        right = _truncate_company_segment(normalize_text(right_raw))
+        left = normalize_text(left_raw).strip(" .-")
+        right = normalize_text(right_raw).strip(" .-")
         if not left or not right:
             continue
 
@@ -921,6 +1137,28 @@ def _parse_experience_dash_or_pipe_line(line: str) -> tuple[str, str] | None:
             return company, title
 
     return None
+
+
+def _rebalance_experience_fields(*, title: str, company: str) -> tuple[str, str]:
+    """Swap title/company when heuristic evidence indicates inversion."""
+
+    clean_title = _clean_experience_title(title)
+    clean_company = _truncate_company_segment(_strip_leading_present_status(company))
+
+    title_company_hint = _company_hint_score(clean_title)
+    company_company_hint = _company_hint_score(clean_company)
+    title_role_hint = 1 if _contains_role_keyword(clean_title) else 0
+    company_role_hint = 1 if _contains_role_keyword(clean_company) else 0
+
+    should_swap = (
+        title_company_hint > company_company_hint
+        and company_role_hint > title_role_hint
+        and not _looks_like_degree_text(clean_company)
+    )
+    if should_swap:
+        clean_title, clean_company = clean_company, clean_title
+
+    return clean_title, clean_company
 
 
 def _contains_role_keyword(value: str) -> bool:
@@ -948,7 +1186,35 @@ def _truncate_company_segment(company_raw: str) -> str:
             break
 
     candidate = re.split(r"[,;|]", candidate, maxsplit=1)[0]
+    candidate = _strip_company_address_tail(candidate)
     return normalize_text(candidate.strip(" .-"))
+
+
+def _strip_company_address_tail(value: str) -> str:
+    """Remove address-like suffix tokens from company candidate."""
+
+    tokens = value.split()
+    if not tokens:
+        return value
+
+    for index, token in enumerate(tokens):
+        lowered = token.lower().strip(".,;")
+        if index < 2:
+            continue
+        if _is_address_like_token(lowered):
+            return " ".join(tokens[:index]).strip()
+        if re.search(r"\d", lowered):
+            return " ".join(tokens[:index]).strip()
+
+    return value
+
+
+def _is_address_like_token(value: str) -> bool:
+    """Return whether one token likely belongs to an address suffix."""
+
+    if any(marker in value for marker in _ADDRESS_TOKENS):
+        return True
+    return bool(re.search(r"(?:^|[-_])(str|strasse|straße)(?:\.|$)", value))
 
 
 def _extract_date_range(line: str) -> tuple[str | None, str | None]:
@@ -1015,6 +1281,10 @@ def _is_plausible_company_name(value: str) -> bool:
         return False
     if "@" in value or "http" in lowered:
         return False
+    if _is_present_status(value):
+        return False
+    if _TRAILING_YEAR_IN_TITLE_PATTERN.search(value):
+        return False
     if any(token in lowered for token in ("delivering", "responsible", "project objective")):
         return False
     return True
@@ -1027,8 +1297,7 @@ def _parse_education_line(line: str, source_locator: str | None) -> ImportedEduc
     if not normalized:
         return None
 
-    lowered = normalized.lower()
-    if not any(marker in lowered for marker in _DEGREE_MARKERS):
+    if not _looks_like_degree_text(normalized):
         return None
 
     segments = [
@@ -1036,11 +1305,19 @@ def _parse_education_line(line: str, source_locator: str | None) -> ImportedEduc
         for part in re.split(r"\s+-\s+|\s+at\s+|\s+bei\s+|\s+\|\s+", normalized)
         if part.strip()
     ]
-    if len(segments) < 2:
-        return None
 
-    left = normalize_text(segments[0])
-    right = normalize_text(re.split(r"[,;|]", segments[1], maxsplit=1)[0])
+    if len(segments) >= 2:
+        left = normalize_text(segments[0])
+        right = normalize_text(re.split(r"[,;|]", segments[1], maxsplit=1)[0])
+    else:
+        comma_parts = [normalize_text(part) for part in normalized.split(",", maxsplit=1) if normalize_text(part)]
+        if len(comma_parts) != 2:
+            return None
+        left, right = comma_parts
+
+    right = normalize_text(
+        re.split(r"\b(expected|graduation|abschluss|since|from)\b", right, maxsplit=1, flags=re.IGNORECASE)[0]
+    )
 
     if _looks_like_degree_text(left):
         degree = left
@@ -1075,7 +1352,9 @@ def _looks_like_degree_text(value: str) -> bool:
     """Return whether one text candidate likely represents degree text."""
 
     lowered = value.lower()
-    return any(marker in lowered for marker in _DEGREE_MARKERS)
+    collapsed = lowered.replace(".", "")
+    markers = tuple(marker.replace(".", "") for marker in _DEGREE_MARKERS)
+    return any(re.search(rf"\b{re.escape(marker)}\b", collapsed) for marker in markers)
 
 
 def _parse_skill_line(line: str, source_locator: str | None) -> list[ImportedSkillDraft]:

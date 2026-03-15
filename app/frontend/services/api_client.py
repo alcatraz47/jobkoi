@@ -19,7 +19,7 @@ class ApiClient:
     """Thin typed HTTP client wrapper for backend API access."""
 
     base_url: str
-    timeout_seconds: float = 20.0
+    timeout_seconds: float = 120.0
 
     def get_json(self, path: str) -> dict[str, Any]:
         """Execute a GET request and parse JSON object response.
@@ -195,7 +195,7 @@ def build_default_api_client() -> ApiClient:
     settings = get_settings()
     host = settings.app_host if settings.app_host != "0.0.0.0" else "127.0.0.1"
     base_url = f"http://{host}:{settings.app_port}/api/v1"
-    return ApiClient(base_url=base_url)
+    return ApiClient(base_url=base_url, timeout_seconds=settings.frontend_api_timeout_seconds)
 
 
 def _parse_object_json(response: httpx.Response) -> dict[str, Any]:

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db_session
+from app.core.logging import get_logger
+from app.db.session import get_db_session, get_session_factory
 from app.schemas.profile_import import (
     ProfileImportApplyResponse,
     ProfileImportDeleteResponse,
@@ -23,6 +25,64 @@ from app.services.profile_import_service import (
 )
 
 router = APIRouter(prefix="/profile-imports", tags=["profile-imports"])
+logger = get_logger(__name__)
+
+
+def _process_queued_cv_import_run(run_id: str) -> None:
+    """Process one queued CV import run in a background task.
+
+    Args:
+        run_id: Import run identifier.
+    """
+
+    session = get_session_factory()()
+    try:
+        service = ProfileImportService(session)
+        service.process_queued_cv_run(run_id)
+    except Exception:
+        logger.exception("Queued CV import processing failed for run_id=%s", run_id)
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
+@router.post("/cv/async", response_model=ProfileImportRunResponse, status_code=status.HTTP_202_ACCEPTED)
+async def import_cv_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_db_session),
+) -> ProfileImportRunResponse:
+    """Queue a profile import run from uploaded CV file.
+
+    Args:
+        background_tasks: FastAPI background task registry.
+        file: Uploaded CV file payload.
+        session: Database session dependency.
+
+    Returns:
+        Queued import run response.
+
+    Raises:
+        HTTPException: If file validation fails.
+    """
+
+    content = await file.read()
+    service = ProfileImportService(session)
+    try:
+        run_response = await run_in_threadpool(
+            service.enqueue_cv_import,
+            file_name=file.filename or "uploaded_cv",
+            content_type=file.content_type,
+            file_bytes=content,
+        )
+    except ProfileImportValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+    background_tasks.add_task(_process_queued_cv_import_run, run_response.id)
+    return run_response
 
 
 @router.post("/cv", response_model=ProfileImportRunResponse, status_code=status.HTTP_201_CREATED)
@@ -46,7 +106,8 @@ async def import_cv(
     content = await file.read()
     service = ProfileImportService(session)
     try:
-        return service.import_cv(
+        return await run_in_threadpool(
+            service.import_cv,
             file_name=file.filename or "uploaded_cv",
             content_type=file.content_type,
             file_bytes=content,

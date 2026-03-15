@@ -329,3 +329,58 @@ def test_profile_import_run_delete_endpoint_removes_run(
 
     assert not list((tmp_path / "imports" / "cv").glob("*"))
 
+
+
+
+def test_cv_import_async_endpoint_queues_and_processes_run(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Async CV endpoint should return queued run and eventually produce extraction output."""
+
+    monkeypatch.setattr(
+        profile_import_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(import_storage_dir=str(tmp_path / "imports")),
+    )
+
+    def fake_extract(
+        self,
+        *,
+        file_path,
+        file_name: str,
+        content_type: str | None,
+    ) -> ExtractedTextResult:
+        _ = (self, file_path, file_name, content_type)
+        return ExtractedTextResult(
+            text=(
+                "Arfan Example\n"
+                "Backend Engineer\n"
+                "arfan@example.com\n"
+                "Experience\n"
+                "Software Engineer at Example GmbH\n"
+                "Skills\n"
+                "Python"
+            ),
+            extractor_name="fake_cv",
+        )
+
+    monkeypatch.setattr(
+        "app.services.profile_import_extractors.CvImportExtractor.extract_from_file",
+        fake_extract,
+    )
+
+    import_response = client.post(
+        "/api/v1/profile-imports/cv/async",
+        files={"file": ("resume.pdf", b"fake-pdf-bytes", "application/pdf")},
+    )
+    assert import_response.status_code == 202
+
+    queued = import_response.json()
+    run_id = queued["id"]
+    assert queued["status"] == "queued"
+
+    get_response = client.get(f"/api/v1/profile-imports/{run_id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] in {"queued", "running", "extracted"}
