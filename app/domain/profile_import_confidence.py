@@ -51,19 +51,30 @@ def score_scalar_field_confidence(*, field_path: str, value: str) -> int:
         return 45
 
     if field_path == "headline":
-        if 6 <= len(normalized) <= 90:
-            return 72
-        return 48
+        base = 72 if 6 <= len(normalized) <= 90 else 48
+        if _EMAIL_PATTERN.search(normalized) or _PHONE_PATTERN.search(normalized):
+            base -= 55
+        if _looks_like_location_line(normalized):
+            base -= 35
+        if _looks_like_degree_line(normalized):
+            base -= 35
+        return _clamp(base)
 
     if field_path == "summary":
-        if 20 <= len(normalized) <= 450:
-            return 68
-        return 40
+        base = 68 if 20 <= len(normalized) <= 450 else 40
+        if _EMAIL_PATTERN.search(normalized) or _PHONE_PATTERN.search(normalized):
+            base -= 30
+        return _clamp(base)
 
     if field_path == "location":
-        if 2 <= len(normalized) <= 80:
-            return 60
-        return 35
+        base = 60 if 2 <= len(normalized) <= 80 else 35
+        if _EMAIL_PATTERN.search(normalized) or _PHONE_PATTERN.search(normalized):
+            base -= 45
+        if _looks_like_degree_line(normalized):
+            base -= 40
+        if not _looks_like_location_line(normalized):
+            base -= 10
+        return _clamp(base)
 
     return 50
 
@@ -93,6 +104,12 @@ def score_experience_field_confidence(*, field_name: str, value: str, descriptio
             base -= 35
         if len(cleaned.split()) > 8:
             base -= 20
+        if _looks_like_degree_line(cleaned):
+            base -= 35
+        if _looks_like_location_line(cleaned):
+            base -= 25
+        if _contains_temporal_status(cleaned):
+            base -= 15
         return _clamp(base)
 
     if field_name == "company":
@@ -103,6 +120,14 @@ def score_experience_field_confidence(*, field_name: str, value: str, descriptio
             base -= 20
         if "," in cleaned:
             base -= 10
+        if _contains_temporal_status(cleaned):
+            base -= 55
+        if _looks_like_degree_line(cleaned):
+            base -= 45
+        if _contains_role_keyword(cleaned):
+            base -= 20
+        if _contains_address_token(cleaned):
+            base -= 20
         return _clamp(base)
 
     if field_name == "description":
@@ -238,6 +263,46 @@ def _is_high_risk_field_path(field_path: str) -> bool:
     return field_path.startswith("experiences[") or field_path.startswith("educations[")
 
 
+def _looks_like_location_line(value: str) -> bool:
+    """Return whether one value resembles a compact location line."""
+
+    if "," not in value:
+        return False
+    if len(value.split()) > 9:
+        return False
+    return True
+
+
+def _looks_like_degree_line(value: str) -> bool:
+    """Return whether one value resembles an education line."""
+
+    lowered = value.lower()
+    return any(token in lowered for token in _DEGREE_MARKERS + _EDUCATION_MARKERS)
+
+
+def _contains_temporal_status(value: str) -> bool:
+    """Return whether value contains temporal status/date hints."""
+
+    lowered = value.lower()
+    if any(token in lowered for token in ("present", "current", "now", "heute")):
+        return True
+    return bool(_YEAR_PATTERN.search(value))
+
+
+def _contains_role_keyword(value: str) -> bool:
+    """Return whether value contains typical role-title keywords."""
+
+    lowered = value.lower()
+    return any(token in lowered for token in _ROLE_HINTS)
+
+
+def _contains_address_token(value: str) -> bool:
+    """Return whether value contains address/street cues."""
+
+    lowered = value.lower()
+    return any(token in lowered for token in _ADDRESS_TOKENS)
+
+
 def _looks_like_narrative_sentence(value: str) -> bool:
     """Return whether value appears to be long narrative prose."""
 
@@ -254,5 +319,42 @@ def _clamp(value: int, minimum: int = 0, maximum: int = 100) -> int:
 
 
 _EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PHONE_PATTERN = re.compile(r"\+?[0-9][0-9\s().-]{6,}[0-9]")
+_YEAR_PATTERN = re.compile(r"(?:19|20)\d{2}")
 _ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 _DEGREE_MARKERS = ("bachelor", "master", "msc", "bsc", "phd", "diplom", "mba")
+_EDUCATION_MARKERS = (
+    "university",
+    "college",
+    "institute",
+    "faculty",
+    "expected",
+    "graduation",
+    "semester",
+    "thesis",
+    "dissertation",
+)
+_ROLE_HINTS = (
+    "engineer",
+    "developer",
+    "scientist",
+    "analyst",
+    "manager",
+    "architect",
+    "consultant",
+    "specialist",
+    "researcher",
+    "intern",
+    "lead",
+    "director",
+)
+_ADDRESS_TOKENS = (
+    "str.",
+    "straße",
+    "street",
+    "road",
+    "avenue",
+    "platz",
+    "allee",
+    "weg",
+)

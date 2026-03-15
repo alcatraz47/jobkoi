@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
@@ -46,7 +47,8 @@ async def import_cv(
     content = await file.read()
     service = ProfileImportService(session)
     try:
-        return service.import_cv(
+        return await run_in_threadpool(
+            service.import_cv,
             file_name=file.filename or "uploaded_cv",
             content_type=file.content_type,
             file_bytes=content,

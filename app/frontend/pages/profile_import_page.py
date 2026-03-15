@@ -89,6 +89,10 @@ def register_profile_import_page(
                     auto_upload=True,
                 ).props("accept=.pdf,.docx max-file-size=20971520")
 
+                with ui.dialog().props("persistent") as cv_import_progress, ui.card().classes("items-center gap-3 p-6"):
+                    ui.spinner(size="lg")
+                    ui.label("Reading CV and extracting structured profile data. Please wait...").classes("text-sm")
+
                 async def import_cv_action() -> None:
                     """Submit CV import request."""
 
@@ -96,6 +100,8 @@ def register_profile_import_page(
                         ui.notify("Upload a PDF or DOCX file first.", color="warning")
                         return
 
+                    cv_import_progress.open()
+                    ui.notify("Parsing CV import data. Please wait...", color="info")
                     try:
                         run_payload = await run.io_bound(
                             lambda: profile_import_api.import_cv(
@@ -107,6 +113,8 @@ def register_profile_import_page(
                     except FrontendApiError as exc:
                         ui.notify(str(exc), color="negative")
                         return
+                    finally:
+                        cv_import_progress.close()
 
                     import_state.load_selected_run(run_payload)
                     await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
@@ -132,6 +140,10 @@ def register_profile_import_page(
                 )
                 max_pages_input.bind_value(website_max_pages, "value")
 
+                with ui.dialog().props("persistent") as website_import_progress, ui.card().classes("items-center gap-3 p-6"):
+                    ui.spinner(size="lg")
+                    ui.label("Fetching and parsing website data. Please wait...").classes("text-sm")
+
                 async def import_website_action() -> None:
                     """Submit website import request."""
 
@@ -140,6 +152,8 @@ def register_profile_import_page(
                         ui.notify("Enter a portfolio URL first.", color="warning")
                         return
 
+                    website_import_progress.open()
+                    ui.notify("Parsing portfolio website data. Please wait...", color="info")
                     try:
                         run_payload = await run.io_bound(
                             lambda: profile_import_api.import_website(
@@ -152,6 +166,8 @@ def register_profile_import_page(
                     except FrontendApiError as exc:
                         ui.notify(str(exc), color="negative")
                         return
+                    finally:
+                        website_import_progress.close()
 
                     import_state.load_selected_run(run_payload)
                     await _load_runs(import_state=import_state, profile_import_api=profile_import_api)

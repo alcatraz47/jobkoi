@@ -72,3 +72,37 @@ def test_risk_level_for_field_marks_experience_as_high_when_confidence_low() -> 
         confidence_score=52,
     )
     assert risk == "high"
+
+
+def test_score_scalar_field_confidence_penalizes_contact_bundle_as_headline() -> None:
+    """Headline confidence should drop when value looks like contact/location data."""
+
+    score = score_scalar_field_confidence(
+        field_path="headline",
+        value="+49 176 32925096 | Dortmund, Germany",
+    )
+
+    assert score < 40
+
+
+def test_score_scalar_field_confidence_penalizes_education_like_location() -> None:
+    """Location confidence should drop when value looks like education content."""
+
+    score = score_scalar_field_confidence(
+        field_path="location",
+        value="Master of Data Science, Carl von Ossietzky University Oldenburg",
+    )
+
+    assert score < 40
+
+
+def test_score_experience_field_confidence_penalizes_status_as_company() -> None:
+    """Company confidence should be very low for temporal-status values."""
+
+    score = score_experience_field_confidence(
+        field_name="company",
+        value="Present",
+        description=None,
+    )
+
+    assert score < 30
