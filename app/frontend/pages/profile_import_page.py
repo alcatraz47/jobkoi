@@ -399,7 +399,7 @@ def _render_field_decision_row(*, import_state: ProfileImportState, field: dict[
 
     with ui.card().classes("w-full bg-slate-50"):
         ui.label(str(field.get("field_path", "-"))).classes("text-sm font-semibold")
-        ui.label(extracted_value or "(empty)").classes("text-xs text-slate-700")
+        ui.label(extracted_value or "(empty)").classes("text-xs text-slate-700 whitespace-pre-wrap break-words")
         ui.label(
             f"Confidence: {confidence_score} | Risk: {review_risk} | Recommended: {recommended}"
         ).classes("text-xs text-slate-500")
@@ -413,7 +413,7 @@ def _render_field_decision_row(*, import_state: ProfileImportState, field: dict[
                 fid,
                 str(event.value),
             ),
-        )
+        ).classes("w-full").props("outlined")
 
         ui.input(
             "Edited value",
@@ -423,7 +423,7 @@ def _render_field_decision_row(*, import_state: ProfileImportState, field: dict[
                 fid,
                 str(event.value),
             ),
-        )
+        ).classes("w-full").props("outlined")
         ui.input(
             "Reviewer note",
             value=decision.reviewer_note or "",
@@ -432,7 +432,7 @@ def _render_field_decision_row(*, import_state: ProfileImportState, field: dict[
                 fid,
                 str(event.value),
             ),
-        )
+        ).classes("w-full").props("outlined")
 
 
 def _render_conflict_resolution_row(*, import_state: ProfileImportState, conflict: dict[str, Any]) -> None:
@@ -451,10 +451,10 @@ def _render_conflict_resolution_row(*, import_state: ProfileImportState, conflic
         ui.label(str(conflict.get("field_path", "-"))).classes("text-sm font-semibold text-amber-900")
         ui.label(
             f"Existing: {conflict.get('existing_value', '-')}",
-        ).classes("text-xs text-amber-900")
+        ).classes("text-xs text-amber-900 whitespace-pre-wrap break-words")
         ui.label(
             f"Imported: {conflict.get('imported_value', '-')}",
-        ).classes("text-xs text-amber-900")
+        ).classes("text-xs text-amber-900 whitespace-pre-wrap break-words")
 
         ui.select(
             options={
@@ -471,7 +471,7 @@ def _render_conflict_resolution_row(*, import_state: ProfileImportState, conflic
                 cid,
                 str(event.value),
             ),
-        )
+        ).classes("w-full").props("outlined")
         ui.input(
             "Resolution note",
             value=resolution.resolution_note or "",
@@ -480,7 +480,7 @@ def _render_conflict_resolution_row(*, import_state: ProfileImportState, conflic
                 cid,
                 str(event.value),
             ),
-        )
+        ).classes("w-full").props("outlined")
 
 
 def _build_review_payload(import_state: ProfileImportState) -> dict[str, list[dict[str, Any]]]:
