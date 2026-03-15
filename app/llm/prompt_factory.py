@@ -118,6 +118,63 @@ class PromptFactory:
 
         return PromptBundle(system_prompt=system_prompt, user_prompt=user_prompt)
 
+    def build_profile_import_audit_prompt(
+        self,
+        *,
+        source_type: str,
+        source_label: str,
+        detected_language: str,
+        candidate_profile_json: str,
+        raw_text: str,
+    ) -> PromptBundle:
+        """Create prompt bundle for profile-import supervision and scalar correction.
+
+        Args:
+            source_type: Source type such as ``cv_document``.
+            source_label: Human-readable source label.
+            detected_language: Detected source language code.
+            candidate_profile_json: JSON string for current extracted candidate.
+            raw_text: Extracted source text.
+
+        Returns:
+            Prompt bundle for structured profile-audit suggestions.
+        """
+
+        system_prompt = (
+            "You audit an extracted candidate profile against source text. "
+            "Return strict JSON only. Do not include markdown. "
+            "Never invent facts. Suggest only values explicitly present in source text."
+        )
+
+        user_prompt = (
+            "Task: review scalar placement quality for extracted profile data.\n"
+            f"Source type: {source_type}\n"
+            f"Source label: {source_label}\n"
+            f"Language: {detected_language}\n"
+            "Rules:\n"
+            "1) Focus only on scalar fields: full_name, email, phone, location, headline, summary.\n"
+            "2) Use action 'drop' if value is unsupported/noisy.\n"
+            "3) Use action 'replace' only with an explicitly present source value.\n"
+            "4) Use move_to_education when an education-like value is wrongly placed in location/headline/summary.\n"
+            "5) Keep suggestions small and high precision.\n"
+            "Output schema:\n"
+            "{\n"
+            "  \"scalar_suggestions\": [\n"
+            "    {\"field_name\": \"full_name|email|phone|location|headline|summary\", "
+            "\"action\": \"keep|drop|replace|move_to_location|move_to_headline|move_to_summary|move_to_education\", "
+            "\"suggested_value\": str | null, \"reason\": str | null}\n"
+            "  ],\n"
+            "  \"missing_signals\": [str],\n"
+            "  \"warnings\": [str]\n"
+            "}\n"
+            "Current extracted candidate JSON:\n"
+            f"{candidate_profile_json}\n"
+            "Source text:\n"
+            f"{raw_text}"
+        )
+
+        return PromptBundle(system_prompt=system_prompt, user_prompt=user_prompt)
+
     def build_cv_rewrite_prompt(
         self,
         *,

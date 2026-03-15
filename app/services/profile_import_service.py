@@ -34,6 +34,7 @@ from app.domain.profile_import_confidence import (
     recommend_review_decision,
     risk_level_for_field,
 )
+from app.domain.profile_import_adjudication import adjudicate_profile_import_drafts
 from app.domain.profile_import_conflicts import detect_import_conflicts
 from app.domain.job_text import normalize_text
 from app.domain.profile_import_types import (
@@ -41,6 +42,7 @@ from app.domain.profile_import_types import (
     ImportedExperienceDraft,
     ImportedProfileDraft,
     ImportedSkillDraft,
+    ImportedUnmappedCandidate,
 )
 from app.schemas.profile import (
     EducationInput,
@@ -73,7 +75,12 @@ from app.services.profile_import_extractors import (
     compute_sha256_bytes,
 )
 from app.llm import ProfileImportExtractionHelper, get_ollama_client
-from app.llm.contracts import ProfileImportExtractionResponse, ProfileImportScalarField
+from app.llm.contracts import (
+    ProfileImportAuditResponse,
+    ProfileImportAuditScalarSuggestion,
+    ProfileImportExtractionResponse,
+    ProfileImportScalarField,
+)
 from app.llm.errors import LlmError
 from app.services.profile_service import ProfileNotFoundError, ProfileService
 
@@ -133,7 +140,13 @@ class ProfileImportService:
             getattr(settings, "profile_import_llm_enabled", False)
         )
         self._profile_import_llm_max_input_chars = int(
-            getattr(settings, "profile_import_llm_max_input_chars", 24000)
+            getattr(settings, "profile_import_llm_max_input_chars", 16000)
+        )
+        self._profile_import_llm_supervisor_enabled = bool(
+            getattr(settings, "profile_import_llm_supervisor_enabled", True)
+        )
+        self._profile_import_llm_supervisor_max_input_chars = int(
+            getattr(settings, "profile_import_llm_supervisor_max_input_chars", 8000)
         )
         self._profile_import_extraction_helper: ProfileImportExtractionHelper | None = None
         if self._profile_import_llm_enabled:
@@ -716,7 +729,7 @@ class ProfileImportService:
         source_locator: str,
         extractor_name: str,
     ) -> tuple[ImportedProfileDraft, str]:
-        """Merge one optional LLM extraction draft into a base import draft.
+        """Combine LLM proposal with deterministic adjudication and supervision.
 
         Args:
             draft: Deterministic parser draft.
@@ -739,8 +752,18 @@ class ProfileImportService:
         if llm_draft is None:
             return draft, extractor_name
 
-        merged = _merge_imported_profile_drafts(base=draft, incoming=llm_draft)
-        return merged, f"{extractor_name}+llm"
+        adjudicated = adjudicate_profile_import_drafts(
+            llm_draft=llm_draft,
+            rule_draft=draft,
+        )
+        supervised = self._supervise_draft_with_llm_if_available(
+            draft=adjudicated,
+            raw_text=raw_text,
+            source_type=source_type,
+            source_label=source_label,
+            source_locator=source_locator,
+        )
+        return supervised, f"{extractor_name}+llm"
 
     def _build_default_profile_import_extraction_helper(self) -> ProfileImportExtractionHelper | None:
         """Build default LLM profile import helper when configured."""
@@ -795,6 +818,63 @@ class ProfileImportService:
         if _is_empty_import_draft(validated):
             return None
         return validated
+
+    def _supervise_draft_with_llm_if_available(
+        self,
+        *,
+        draft: ImportedProfileDraft,
+        raw_text: str,
+        source_type: str,
+        source_label: str,
+        source_locator: str,
+    ) -> ImportedProfileDraft:
+        """Run optional lightweight LLM supervision and apply safe scalar fixes.
+
+        Args:
+            draft: Current adjudicated draft.
+            raw_text: Source text used for extraction.
+            source_type: Source type label.
+            source_label: Source label.
+            source_locator: Source locator fallback.
+
+        Returns:
+            Draft potentially adjusted by supervisor suggestions.
+        """
+
+        if not self._profile_import_llm_supervisor_enabled:
+            return draft
+        if self._profile_import_extraction_helper is None:
+            return draft
+        if not hasattr(self._profile_import_extraction_helper, "audit_profile"):
+            return draft
+
+        audit_text = _truncate_for_llm_input(
+            raw_text=raw_text,
+            max_chars=self._profile_import_llm_supervisor_max_input_chars,
+        )
+        if len(audit_text) < 40:
+            return draft
+
+        candidate_payload = _build_profile_supervision_payload(draft)
+
+        try:
+            response = self._profile_import_extraction_helper.audit_profile(
+                source_type=source_type,
+                source_label=source_label,
+                raw_text=audit_text,
+                detected_language=detect_import_language(raw_text),
+                candidate_profile_json=candidate_payload,
+            )
+        except LlmError:
+            return draft
+
+        return _apply_supervisor_response_to_draft(
+            draft=draft,
+            response=response,
+            raw_text=raw_text,
+            source_locator=source_locator,
+        )
+
 
     def _build_run_payload_from_draft(
         self,
@@ -1809,3 +1889,247 @@ def _is_empty_import_draft(draft: ImportedProfileDraft) -> bool:
     if draft.skills:
         return False
     return True
+
+
+def _build_profile_supervision_payload(draft: ImportedProfileDraft) -> str:
+    """Build compact JSON payload for supervisor prompt.
+
+    Args:
+        draft: Current extracted draft.
+
+    Returns:
+        Serialized compact candidate payload.
+    """
+
+    payload = {
+        "scalars": {
+            "full_name": draft.full_name,
+            "email": draft.email,
+            "phone": draft.phone,
+            "location": draft.location,
+            "headline": draft.headline,
+            "summary": draft.summary,
+        },
+        "experiences": [
+            {
+                "company": item.company,
+                "title": item.title,
+                "start_date": item.start_date,
+                "end_date": item.end_date,
+            }
+            for item in draft.experiences[:8]
+        ],
+        "educations": [
+            {
+                "institution": item.institution,
+                "degree": item.degree,
+                "field_of_study": item.field_of_study,
+            }
+            for item in draft.educations[:8]
+        ],
+        "skills": [item.skill_name for item in draft.skills[:20]],
+    }
+    return json.dumps(payload, ensure_ascii=True)
+
+
+def _apply_supervisor_response_to_draft(
+    *,
+    draft: ImportedProfileDraft,
+    response: ProfileImportAuditResponse,
+    raw_text: str,
+    source_locator: str,
+) -> ImportedProfileDraft:
+    """Apply supported scalar supervisor suggestions to one draft.
+
+    Args:
+        draft: Current extracted draft.
+        response: Structured supervisor response.
+        raw_text: Original source text.
+        source_locator: Source locator fallback for generated section rows.
+
+    Returns:
+        Updated draft with safe supervisor corrections.
+    """
+
+    normalized_source = normalize_text(raw_text).lower()
+    source_tokens = set(_TOKEN_PATTERN.findall(normalized_source))
+
+    scalar_map: dict[str, str | None] = {
+        "full_name": draft.full_name,
+        "email": draft.email,
+        "phone": draft.phone,
+        "location": draft.location,
+        "headline": draft.headline,
+        "summary": draft.summary,
+    }
+
+    educations = list(draft.educations)
+    for suggestion in response.scalar_suggestions[:20]:
+        _apply_scalar_supervisor_suggestion(
+            scalar_map=scalar_map,
+            educations=educations,
+            suggestion=suggestion,
+            normalized_source=normalized_source,
+            source_tokens=source_tokens,
+            source_locator=source_locator,
+        )
+
+    notes = list(draft.unmapped_candidates)
+    for message in response.missing_signals[:8]:
+        note_value = _normalize_value(message, max_length=220)
+        if note_value:
+            notes.append(
+                ImportedUnmappedCandidate(
+                    text=f"Missing signal: {note_value}",
+                    section_hint="supervision",
+                    reason="llm_supervisor_missing",
+                    source_locator=source_locator,
+                )
+            )
+    for message in response.warnings[:8]:
+        note_value = _normalize_value(message, max_length=220)
+        if note_value:
+            notes.append(
+                ImportedUnmappedCandidate(
+                    text=f"Supervisor warning: {note_value}",
+                    section_hint="supervision",
+                    reason="llm_supervisor_warning",
+                    source_locator=source_locator,
+                )
+            )
+
+    return ImportedProfileDraft(
+        full_name=scalar_map.get("full_name"),
+        email=scalar_map.get("email"),
+        phone=scalar_map.get("phone"),
+        location=scalar_map.get("location"),
+        headline=scalar_map.get("headline"),
+        summary=scalar_map.get("summary"),
+        experiences=list(draft.experiences),
+        educations=educations,
+        skills=list(draft.skills),
+        unmapped_candidates=notes,
+    )
+
+
+def _apply_scalar_supervisor_suggestion(
+    *,
+    scalar_map: dict[str, str | None],
+    educations: list[ImportedEducationDraft],
+    suggestion: ProfileImportAuditScalarSuggestion,
+    normalized_source: str,
+    source_tokens: set[str],
+    source_locator: str,
+) -> None:
+    """Apply one supported scalar suggestion in place.
+
+    Args:
+        scalar_map: Mutable scalar mapping for imported draft.
+        educations: Mutable education rows for imported draft.
+        suggestion: Scalar suggestion payload.
+        normalized_source: Lower-cased normalized source text.
+        source_tokens: Source token set.
+        source_locator: Source locator fallback.
+    """
+
+    field_name = suggestion.field_name
+    current_value = scalar_map.get(field_name)
+    action = suggestion.action
+    suggested_value = _normalize_value(suggestion.suggested_value, max_length=1200)
+
+    if action == "keep":
+        return
+    if action == "drop":
+        scalar_map[field_name] = None
+        return
+
+    if action == "replace":
+        if suggested_value and _is_supported_value(
+            value=suggested_value,
+            normalized_source=normalized_source,
+            source_tokens=source_tokens,
+        ):
+            scalar_map[field_name] = suggested_value
+        return
+
+    if action in {"move_to_location", "move_to_headline", "move_to_summary", "move_to_education"}:
+        candidate = suggested_value or current_value
+        if not candidate:
+            return
+        if not _is_supported_value(
+            value=candidate,
+            normalized_source=normalized_source,
+            source_tokens=source_tokens,
+        ):
+            return
+
+        if action == "move_to_location":
+            scalar_map["location"] = candidate
+        elif action == "move_to_headline":
+            scalar_map["headline"] = candidate
+        elif action == "move_to_summary":
+            scalar_map["summary"] = candidate
+        elif action == "move_to_education":
+            _append_education_from_fragment(
+                fragment=candidate,
+                educations=educations,
+                source_locator=source_locator,
+            )
+
+        scalar_map[field_name] = None
+
+
+def _append_education_from_fragment(
+    *,
+    fragment: str,
+    educations: list[ImportedEducationDraft],
+    source_locator: str,
+) -> None:
+    """Append one education row parsed from scalar fragment when possible.
+
+    Args:
+        fragment: Education-like scalar text.
+        educations: Mutable education list.
+        source_locator: Source locator for inserted row.
+    """
+
+    normalized = normalize_text(fragment)
+    if not normalized:
+        return
+
+    if "," in normalized:
+        first, second = [part.strip() for part in normalized.split(",", 1)]
+    else:
+        first, second = normalized, ""
+
+    degree = first if len(first.split()) <= 16 else ""
+    institution = second if second else ""
+
+    if not degree:
+        return
+    if not institution:
+        lowered = normalized.lower()
+        if "university" in lowered or "college" in lowered or "hochschule" in lowered:
+            institution = normalized
+        else:
+            return
+
+    key = (institution.strip().lower(), degree.strip().lower())
+    existing = {
+        (item.institution.strip().lower(), item.degree.strip().lower())
+        for item in educations
+    }
+    if key in existing:
+        return
+
+    educations.append(
+        ImportedEducationDraft(
+            institution=institution,
+            degree=degree,
+            field_of_study=None,
+            start_date=None,
+            end_date=None,
+            source_locator=source_locator,
+            source_excerpt=normalized,
+        )
+    )

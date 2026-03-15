@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from nicegui import run, ui
@@ -70,6 +71,7 @@ def register_profile_import_page(
                     profile_import_api=profile_import_api,
                     known_run_statuses=known_run_statuses,
                     runs_request_state=runs_request_state,
+                    refresh_run_list=refresh_run_list,
                     activity_rows=activity_rows,
                 )
 
@@ -150,6 +152,7 @@ def register_profile_import_page(
                         runs_request_state=runs_request_state,
                     )
                     _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
+                    refresh_run_list()
                     ui.notify("CV import queued. You will be notified when parsing finishes.", color="positive")
 
                 ui.button("Start CV Import", on_click=import_cv_action)
@@ -208,15 +211,27 @@ def register_profile_import_page(
                         runs_request_state=runs_request_state,
                     )
                     _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
+                    refresh_run_list()
                     ui.notify("Website import queued. You will be notified when parsing finishes.", color="positive")
 
                 ui.button("Start Website Import", on_click=import_website_action)
 
-            _render_run_list(
-                import_state=import_state,
-                profile_import_api=profile_import_api,
-                runs_request_state=runs_request_state,
-            )
+            run_list_container = ui.column().classes("w-full")
+
+            def refresh_run_list() -> None:
+                """Refresh import run list card contents."""
+
+                run_list_container.clear()
+                with run_list_container:
+                    _render_run_list(
+                        import_state=import_state,
+                        profile_import_api=profile_import_api,
+                        runs_request_state=runs_request_state,
+                        refresh_run_list=refresh_run_list,
+                    )
+
+            refresh_run_list()
+
             _render_selected_run_review(
                 import_state=import_state,
                 profile_import_api=profile_import_api,
@@ -229,6 +244,7 @@ def _render_run_list(
     import_state: ProfileImportState,
     profile_import_api: ProfileImportApi,
     runs_request_state: dict[str, int],
+    refresh_run_list: Callable[[], None],
 ) -> None:
     """Render import run list panel with retract and delete actions."""
 
@@ -246,7 +262,9 @@ def _render_run_list(
             source = item.get("source") if isinstance(item.get("source"), dict) else {}
             label = str(source.get("source_label", "-"))
             status = str(item.get("status", "-"))
+            status_lower = status.lower()
             created_at = str(item.get("created_at", ""))
+            actions_enabled = status_lower in {"extracted", "reviewed", "applied", "rejected"}
 
             async def retract_action(target_run_id: str = run_id) -> None:
                 """Mark one run as rejected (retracted) from list view."""
@@ -265,6 +283,7 @@ def _render_run_list(
                     profile_import_api=profile_import_api,
                     runs_request_state=runs_request_state,
                 )
+                refresh_run_list()
                 ui.notify("Import run retracted.", color="warning")
                 ui.navigate.to(f"/profile-import?run_id={target_run_id}")
 
@@ -287,16 +306,26 @@ def _render_run_list(
                     profile_import_api=profile_import_api,
                     runs_request_state=runs_request_state,
                 )
+                refresh_run_list()
                 ui.notify("Import run deleted.", color="warning")
                 ui.navigate.to("/profile-import")
 
             with ui.row().classes("w-full items-center justify-between border-b py-2"):
                 ui.label(f"{label} • {status} • {created_at[:19].replace('T', ' ')}").classes("text-sm")
                 with ui.row().classes("items-center gap-2"):
-                    ui.link("Open", target=f"/profile-import?run_id={run_id}")
-                    if status not in {"rejected"}:
-                        ui.button("Retract", on_click=retract_action).props("flat color=warning")
-                    ui.button("Delete", on_click=delete_action).props("flat color=negative")
+                    if actions_enabled:
+                        ui.link("Open", target=f"/profile-import?run_id={run_id}")
+                    else:
+                        ui.label("Waiting for parsing...").classes("text-xs text-slate-500")
+
+                    if status_lower not in {"rejected"}:
+                        retract_button = ui.button("Retract", on_click=retract_action).props("flat color=warning")
+                        if not actions_enabled:
+                            retract_button.disable()
+
+                    delete_button = ui.button("Delete", on_click=delete_action).props("flat color=negative")
+                    if not actions_enabled:
+                        delete_button.disable()
 
 
 def _render_selected_run_review(
@@ -702,6 +731,7 @@ async def _poll_import_activity(
     profile_import_api: ProfileImportApi,
     known_run_statuses: dict[str, str],
     runs_request_state: dict[str, int],
+    refresh_run_list: Callable[[], None],
     activity_rows: Any,
 ) -> None:
     """Poll import runs, refresh activity panel, and notify on status transitions.
@@ -711,6 +741,7 @@ async def _poll_import_activity(
         profile_import_api: Profile import API adapter.
         known_run_statuses: Mutable map of known statuses by run id.
         runs_request_state: Request version state for race-safe run refreshes.
+        refresh_run_list: Callback to refresh rendered run list contents.
         activity_rows: NiceGUI container for activity rows.
     """
 
@@ -721,6 +752,7 @@ async def _poll_import_activity(
         runs_request_state=runs_request_state,
     )
     _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
+    refresh_run_list()
 
     latest_statuses = _build_run_status_map(import_state.runs)
     known_run_statuses.clear()
@@ -733,13 +765,15 @@ async def _poll_import_activity(
 
         current_status = latest_statuses.get(run_id, "")
         previous_status = previous_statuses.get(run_id)
-        if previous_status is None or current_status == previous_status:
+        if current_status == previous_status:
             continue
 
         source = item.get("source") if isinstance(item.get("source"), dict) else {}
         source_label = str(source.get("source_label", "Import run"))
 
-        if current_status == "running":
+        if current_status == "queued":
+            ui.notify(f"Import queued: {source_label}", color="info")
+        elif current_status == "running":
             ui.notify(f"Import started: {source_label}", color="info")
         elif current_status == "extracted":
             ui.notify(f"Import completed: {source_label}", color="positive")

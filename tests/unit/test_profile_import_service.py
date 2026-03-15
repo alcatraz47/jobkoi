@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.orm import Session
 
-from app.llm.contracts import ProfileImportExtractionResponse
+from app.llm.contracts import (
+    ProfileImportAuditResponse,
+    ProfileImportExtractionResponse,
+)
 from app.schemas.profile_import import FieldDecisionInput, ProfileImportReviewRequest, WebsiteImportRequest
 from app.services.profile_import_extractors import ExtractedTextResult, ProfileImportExtractionError, WebsitePageResult
 from app.services.profile_import_service import (
@@ -192,14 +195,21 @@ def test_service_delete_run_removes_run_and_source_file(
 class _FakeProfileImportExtractionHelper:
     """Deterministic fake LLM extraction helper for service tests."""
 
-    def __init__(self, response: ProfileImportExtractionResponse) -> None:
-        """Initialize fake helper with one fixed response payload.
+    def __init__(
+        self,
+        response: ProfileImportExtractionResponse,
+        *,
+        audit_response: ProfileImportAuditResponse | None = None,
+    ) -> None:
+        """Initialize fake helper with fixed extraction and optional audit payload.
 
         Args:
             response: Structured profile extraction response.
+            audit_response: Optional structured profile audit response.
         """
 
         self._response = response
+        self._audit_response = audit_response or ProfileImportAuditResponse()
 
     def extract_profile(
         self,
@@ -209,20 +219,24 @@ class _FakeProfileImportExtractionHelper:
         raw_text: str,
         detected_language: str,
     ) -> ProfileImportExtractionResponse:
-        """Return configured response payload.
-
-        Args:
-            source_type: Source type.
-            source_label: Source label.
-            raw_text: Input text.
-            detected_language: Input language.
-
-        Returns:
-            Structured profile extraction response.
-        """
+        """Return configured extraction payload."""
 
         _ = (source_type, source_label, raw_text, detected_language)
         return self._response
+
+    def audit_profile(
+        self,
+        *,
+        source_type: str,
+        source_label: str,
+        raw_text: str,
+        detected_language: str,
+        candidate_profile_json: str,
+    ) -> ProfileImportAuditResponse:
+        """Return configured supervisor audit payload."""
+
+        _ = (source_type, source_label, raw_text, detected_language, candidate_profile_json)
+        return self._audit_response
 
 
 def test_service_cv_import_merges_supported_llm_fields_only(
@@ -429,3 +443,73 @@ def test_service_enqueue_and_process_website_import(db_session: Session, tmp_pat
     processed = service.get_run(queued.id)
     assert processed.status == "extracted"
     assert processed.fields
+
+
+def test_service_supervisor_reassigns_education_like_location_to_education(
+    db_session: Session,
+    tmp_path,
+) -> None:
+    """Supervisor should move education-like scalar text out of location."""
+
+    class _EducationLikeCvExtractor:
+        """Deterministic CV extractor with education text in source."""
+
+        def extract_from_file(
+            self,
+            *,
+            file_path,
+            file_name: str,
+            content_type: str | None,
+        ) -> ExtractedTextResult:
+            _ = (file_path, file_name, content_type)
+            return ExtractedTextResult(
+                text=(
+                    "Arfan Example\\n"
+                    "Master of Data Science, Carl von Ossietzky University Oldenburg\\n"
+                    "arfan@example.com\\n"
+                ),
+                extractor_name="fake_cv",
+            )
+
+    service = ProfileImportService(
+        db_session,
+        cv_extractor=_EducationLikeCvExtractor(),
+        website_extractor=_FakeWebsiteExtractor(),
+        import_storage_dir=tmp_path,
+    )
+    service._profile_import_llm_enabled = True
+    service._profile_import_llm_supervisor_enabled = True
+    service._profile_import_extraction_helper = _FakeProfileImportExtractionHelper(
+        ProfileImportExtractionResponse(
+            full_name={"value": "Arfan Example", "source_excerpt": "Arfan Example", "source_locator": "resume.pdf"},
+            email={"value": "arfan@example.com", "source_excerpt": "arfan@example.com", "source_locator": "resume.pdf"},
+            location={
+                "value": "Master of Data Science, Carl von Ossietzky University Oldenburg",
+                "source_excerpt": "Master of Data Science, Carl von Ossietzky University Oldenburg",
+                "source_locator": "resume.pdf",
+            },
+        ),
+        audit_response=ProfileImportAuditResponse(
+            scalar_suggestions=[
+                {
+                    "field_name": "location",
+                    "action": "move_to_education",
+                    "suggested_value": "Master of Data Science, Carl von Ossietzky University Oldenburg",
+                }
+            ]
+        ),
+    )
+
+    run = service.import_cv(
+        file_name="resume.pdf",
+        content_type="application/pdf",
+        file_bytes=b"pdf-bytes",
+    )
+
+    field_values = {item.field_path: item.suggested_value for item in run.fields}
+    assert field_values.get("location") != "Master of Data Science, Carl von Ossietzky University Oldenburg"
+    assert any(
+        str(item.suggested_value).startswith("Master of Data Science")
+        for item in run.fields
+        if item.field_path.endswith(".degree")
+    )
