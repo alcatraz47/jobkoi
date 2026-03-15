@@ -754,13 +754,15 @@ async def _poll_import_activity(
 
         current_status = latest_statuses.get(run_id, "")
         previous_status = previous_statuses.get(run_id)
-        if previous_status is None or current_status == previous_status:
+        if current_status == previous_status:
             continue
 
         source = item.get("source") if isinstance(item.get("source"), dict) else {}
         source_label = str(source.get("source_label", "Import run"))
 
-        if current_status == "running":
+        if current_status == "queued":
+            ui.notify(f"Import queued: {source_label}", color="info")
+        elif current_status == "running":
             ui.notify(f"Import started: {source_label}", color="info")
         elif current_status == "extracted":
             ui.notify(f"Import completed: {source_label}", color="positive")
