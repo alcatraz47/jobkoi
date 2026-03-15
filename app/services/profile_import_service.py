@@ -348,10 +348,23 @@ class ProfileImportService:
             combined_text_parts.append(page.text)
 
         merged_text = "\n".join(combined_text_parts)
+        combined_draft = build_imported_profile_from_text(
+            text=merged_text,
+            source_locator=request.url,
+        )
+        merged = _merge_imported_profile_drafts(base=merged, incoming=combined_draft)
+        merged, combined_extractor_name = self._merge_draft_with_llm_if_available(
+            draft=merged,
+            raw_text=merged_text,
+            source_type="portfolio_website",
+            source_label=request.url,
+            source_locator=request.url,
+            extractor_name=extractor_name,
+        )
         run_payload = self._build_run_payload_from_draft(
             draft=merged,
             raw_text=merged_text,
-            extractor_name=extractor_name,
+            extractor_name=combined_extractor_name,
             extractor_version=None,
         )
         run = self._repository.create_run(source.id, run_payload)
@@ -553,7 +566,45 @@ class ProfileImportService:
         """Build repository run payload from raw text."""
 
         draft = build_imported_profile_from_text(text=raw_text, source_locator=source_locator)
-        combined_extractor_name = extractor_name
+        merged_draft, combined_extractor_name = self._merge_draft_with_llm_if_available(
+            draft=draft,
+            raw_text=raw_text,
+            source_type=source_type,
+            source_label=source_label,
+            source_locator=source_locator,
+            extractor_name=extractor_name,
+        )
+
+        return self._build_run_payload_from_draft(
+            draft=merged_draft,
+            raw_text=raw_text,
+            extractor_name=combined_extractor_name,
+            extractor_version=extractor_version,
+        )
+
+    def _merge_draft_with_llm_if_available(
+        self,
+        *,
+        draft: ImportedProfileDraft,
+        raw_text: str,
+        source_type: str,
+        source_label: str,
+        source_locator: str,
+        extractor_name: str,
+    ) -> tuple[ImportedProfileDraft, str]:
+        """Merge one optional LLM extraction draft into a base import draft.
+
+        Args:
+            draft: Deterministic parser draft.
+            raw_text: Source text used for extraction.
+            source_type: Source type label.
+            source_label: Source label.
+            source_locator: Source locator used for field traces.
+            extractor_name: Base extractor name.
+
+        Returns:
+            Tuple of merged draft and effective extractor name.
+        """
 
         llm_draft = self._extract_llm_draft_for_source(
             raw_text=raw_text,
@@ -561,16 +612,11 @@ class ProfileImportService:
             source_label=source_label,
             source_locator=source_locator,
         )
-        if llm_draft is not None:
-            draft = _merge_imported_profile_drafts(base=draft, incoming=llm_draft)
-            combined_extractor_name = f"{extractor_name}+llm"
+        if llm_draft is None:
+            return draft, extractor_name
 
-        return self._build_run_payload_from_draft(
-            draft=draft,
-            raw_text=raw_text,
-            extractor_name=combined_extractor_name,
-            extractor_version=extractor_version,
-        )
+        merged = _merge_imported_profile_drafts(base=draft, incoming=llm_draft)
+        return merged, f"{extractor_name}+llm"
 
     def _build_default_profile_import_extraction_helper(self) -> ProfileImportExtractionHelper | None:
         """Build default LLM profile import helper when configured."""
@@ -590,7 +636,7 @@ class ProfileImportService:
     ) -> ImportedProfileDraft | None:
         """Extract and validate one optional LLM draft from source text."""
 
-        if source_type != "cv_document":
+        if source_type not in {"cv_document", "portfolio_website"}:
             return None
         if not self._profile_import_llm_enabled:
             return None
