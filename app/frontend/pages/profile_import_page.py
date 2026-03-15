@@ -262,7 +262,9 @@ def _render_run_list(
             source = item.get("source") if isinstance(item.get("source"), dict) else {}
             label = str(source.get("source_label", "-"))
             status = str(item.get("status", "-"))
+            status_lower = status.lower()
             created_at = str(item.get("created_at", ""))
+            actions_enabled = status_lower in {"extracted", "reviewed", "applied", "rejected"}
 
             async def retract_action(target_run_id: str = run_id) -> None:
                 """Mark one run as rejected (retracted) from list view."""
@@ -311,10 +313,19 @@ def _render_run_list(
             with ui.row().classes("w-full items-center justify-between border-b py-2"):
                 ui.label(f"{label} • {status} • {created_at[:19].replace('T', ' ')}").classes("text-sm")
                 with ui.row().classes("items-center gap-2"):
-                    ui.link("Open", target=f"/profile-import?run_id={run_id}")
-                    if status not in {"rejected"}:
-                        ui.button("Retract", on_click=retract_action).props("flat color=warning")
-                    ui.button("Delete", on_click=delete_action).props("flat color=negative")
+                    if actions_enabled:
+                        ui.link("Open", target=f"/profile-import?run_id={run_id}")
+                    else:
+                        ui.label("Waiting for parsing...").classes("text-xs text-slate-500")
+
+                    if status_lower not in {"rejected"}:
+                        retract_button = ui.button("Retract", on_click=retract_action).props("flat color=warning")
+                        if not actions_enabled:
+                            retract_button.disable()
+
+                    delete_button = ui.button("Delete", on_click=delete_action).props("flat color=negative")
+                    if not actions_enabled:
+                        delete_button.disable()
 
 
 def _render_selected_run_review(
