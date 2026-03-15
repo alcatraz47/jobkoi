@@ -185,7 +185,7 @@ def register_profile_import_page(
                         return
 
                     website_import_progress.open()
-                    ui.notify("Parsing portfolio website data. Please wait...", color="info")
+                    ui.notify("Queueing website import. You can continue using the app.", color="info")
                     try:
                         run_payload = await run.io_bound(
                             lambda: profile_import_api.import_website(
@@ -208,7 +208,7 @@ def register_profile_import_page(
                         runs_request_state=runs_request_state,
                     )
                     _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
-                    ui.notify("Website import run created.", color="positive")
+                    ui.notify("Website import queued. You will be notified when parsing finishes.", color="positive")
 
                 ui.button("Start Website Import", on_click=import_website_action)
 
