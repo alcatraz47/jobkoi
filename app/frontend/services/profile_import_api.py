@@ -32,7 +32,7 @@ class ProfileImportApi:
         """
 
         return self._client.post_multipart(
-            "/profile-imports/cv",
+            "/profile-imports/cv/async",
             {
                 "file": (file_name, file_bytes, content_type),
             },

@@ -179,6 +179,57 @@ class ProfileImportRepository:
         self._session.flush()
         return run
 
+    def replace_run_extraction_result(
+        self,
+        *,
+        run: ProfileImportRunModel,
+        payload: ImportRunPayload,
+    ) -> None:
+        """Replace one run's extracted payload, fields, and conflicts.
+
+        Args:
+            run: Target run model.
+            payload: Extracted run payload.
+        """
+
+        run.extractor_name = payload.extractor_name
+        run.extractor_version = payload.extractor_version
+        run.status = payload.status
+        run.detected_language = payload.detected_language
+        run.raw_text = payload.raw_text
+        run.structured_payload_json = payload.structured_payload_json
+
+        run.fields.clear()
+        run.conflicts.clear()
+
+        for item in payload.fields:
+            run.fields.append(
+                ProfileImportFieldModel(
+                    field_path=item.field_path,
+                    section_type=item.section_type,
+                    source_locator=item.source_locator,
+                    source_excerpt=item.source_excerpt,
+                    extracted_value=item.extracted_value,
+                    suggested_value=item.suggested_value,
+                    confidence_score=item.confidence_score,
+                    decision_status=item.decision_status,
+                    sort_order=item.sort_order,
+                )
+            )
+
+        for item in payload.conflicts:
+            run.conflicts.append(
+                ProfileImportConflictModel(
+                    field_path=item.field_path,
+                    conflict_type=item.conflict_type,
+                    existing_value=item.existing_value,
+                    imported_value=item.imported_value,
+                )
+            )
+
+        self._session.add(run)
+        self._session.flush()
+
     def get_run(self, run_id: str) -> ProfileImportRunModel | None:
         """Fetch one import run with source, fields, decisions, and conflicts.
 

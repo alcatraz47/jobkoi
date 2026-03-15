@@ -47,6 +47,27 @@ def register_profile_import_page(
             pending_upload: dict[str, Any] = {"name": "", "bytes": b"", "content_type": "application/octet-stream"}
             website_url = {"value": ""}
             website_max_pages = {"value": 3}
+            known_run_statuses = _build_run_status_map(import_state.runs)
+
+            with ui.card().classes("w-full"):
+                ui.label("Import Activity").classes("text-md font-semibold")
+                ui.label(
+                    "Queued and running imports continue in background while you use other pages."
+                ).classes("text-sm text-slate-600")
+                activity_rows = ui.column().classes("w-full gap-2")
+                _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
+
+            async def poll_import_activity() -> None:
+                """Poll run status updates and emit user notifications."""
+
+                await _poll_import_activity(
+                    import_state=import_state,
+                    profile_import_api=profile_import_api,
+                    known_run_statuses=known_run_statuses,
+                    activity_rows=activity_rows,
+                )
+
+            ui.timer(3.0, poll_import_activity)
 
             with ui.card().classes("w-full"):
                 ui.label("CV Import (PDF/DOCX)").classes("text-md font-semibold")
@@ -101,7 +122,7 @@ def register_profile_import_page(
                         return
 
                     cv_import_progress.open()
-                    ui.notify("Parsing CV import data. Please wait...", color="info")
+                    ui.notify("Queueing CV import. You can continue using the app.", color="info")
                     try:
                         run_payload = await run.io_bound(
                             lambda: profile_import_api.import_cv(
@@ -118,8 +139,8 @@ def register_profile_import_page(
 
                     import_state.load_selected_run(run_payload)
                     await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
-                    ui.notify("CV import run created.", color="positive")
-                    ui.navigate.to("/profile-import")
+                    _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
+                    ui.notify("CV import queued. You will be notified when parsing finishes.", color="positive")
 
                 ui.button("Start CV Import", on_click=import_cv_action)
 
@@ -171,8 +192,8 @@ def register_profile_import_page(
 
                     import_state.load_selected_run(run_payload)
                     await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+                    _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
                     ui.notify("Website import run created.", color="positive")
-                    ui.navigate.to("/profile-import")
 
                 ui.button("Start Website Import", on_click=import_website_action)
 
@@ -584,6 +605,117 @@ def _count_pending_conflicts(run_payload: dict[str, Any] | None) -> int:
         if str(conflict.get("resolution_status", "pending")) == "pending":
             count += 1
     return count
+
+
+def _build_run_status_map(runs: list[dict[str, Any]]) -> dict[str, str]:
+    """Build identifier-to-status mapping from run payloads.
+
+    Args:
+        runs: Import run payload list.
+
+    Returns:
+        Mapping of run identifiers to statuses.
+    """
+
+    mapping: dict[str, str] = {}
+    for item in runs:
+        run_id = str(item.get("id", ""))
+        if not run_id:
+            continue
+        mapping[run_id] = str(item.get("status", ""))
+    return mapping
+
+
+def _render_import_activity_rows(*, activity_rows: Any, runs: list[dict[str, Any]]) -> None:
+    """Render compact import activity rows for queued/running runs.
+
+    Args:
+        activity_rows: NiceGUI container for rows.
+        runs: Import run payload list.
+    """
+
+    activity_rows.clear()
+    active = [item for item in runs if str(item.get("status", "")).lower() in {"queued", "running"}]
+    if not active:
+        with activity_rows:
+            ui.label("No background import jobs running.").classes("text-sm text-slate-600")
+        return
+
+    with activity_rows:
+        for item in active:
+            source = item.get("source") if isinstance(item.get("source"), dict) else {}
+            label = str(source.get("source_label", "-"))
+            status = str(item.get("status", "-")).upper()
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label(label).classes("text-sm")
+                ui.badge(status).props("color=info")
+
+
+async def _poll_import_activity(
+    *,
+    import_state: ProfileImportState,
+    profile_import_api: ProfileImportApi,
+    known_run_statuses: dict[str, str],
+    activity_rows: Any,
+) -> None:
+    """Poll import runs, refresh activity panel, and notify on status transitions.
+
+    Args:
+        import_state: Shared import workflow state.
+        profile_import_api: Profile import API adapter.
+        known_run_statuses: Mutable map of known statuses by run id.
+        activity_rows: NiceGUI container for activity rows.
+    """
+
+    previous_statuses = dict(known_run_statuses)
+    await _load_runs(import_state=import_state, profile_import_api=profile_import_api)
+    _render_import_activity_rows(activity_rows=activity_rows, runs=import_state.runs)
+
+    latest_statuses = _build_run_status_map(import_state.runs)
+    known_run_statuses.clear()
+    known_run_statuses.update(latest_statuses)
+
+    for item in import_state.runs:
+        run_id = str(item.get("id", ""))
+        if not run_id:
+            continue
+
+        current_status = latest_statuses.get(run_id, "")
+        previous_status = previous_statuses.get(run_id)
+        if previous_status is None or current_status == previous_status:
+            continue
+
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        source_label = str(source.get("source_label", "Import run"))
+
+        if current_status == "running":
+            ui.notify(f"Import started: {source_label}", color="info")
+        elif current_status == "extracted":
+            ui.notify(f"Import completed: {source_label}", color="positive")
+        elif current_status == "failed":
+            ui.notify(f"Import failed: {source_label}", color="negative")
+
+    selected_run_id = ""
+    if isinstance(import_state.selected_run, dict):
+        selected_run_id = str(import_state.selected_run.get("id", ""))
+
+    if not selected_run_id:
+        return
+
+    selected_status = latest_statuses.get(selected_run_id)
+    if selected_status not in {"extracted", "reviewed", "applied", "failed"}:
+        return
+
+    if previous_statuses.get(selected_run_id) == selected_status:
+        return
+
+    try:
+        refreshed = await run.io_bound(lambda: profile_import_api.get_run(selected_run_id))
+    except FrontendApiError:
+        return
+
+    import_state.load_selected_run(refreshed)
+
 
 
 async def _load_runs(*, import_state: ProfileImportState, profile_import_api: ProfileImportApi) -> None:

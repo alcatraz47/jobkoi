@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models.profile_import import ProfileImportRunModel
+from app.db.models.profile_import import ProfileImportRunModel, ProfileImportSourceModel
 from app.db.repositories.profile_import_repository import (
     AppliedFactPayload,
     ConflictResolutionPayload,
@@ -161,19 +161,9 @@ class ProfileImportService:
             ProfileImportExtractionError: If source text extraction fails.
         """
 
-        self._validate_cv_file_name(file_name)
-        source_path = self._persist_source_file(file_name=file_name, file_bytes=file_bytes)
-        checksum = compute_sha256_bytes(file_bytes)
-
-        source = self._repository.create_source(
-            ImportSourcePayload(
-                source_type="cv_document",
-                source_label=file_name,
-                file_name=file_name,
-                file_path=str(source_path),
-                source_url=None,
-                checksum_sha256=checksum,
-            )
+        source, source_path = self._create_cv_source(
+            file_name=file_name,
+            file_bytes=file_bytes,
         )
 
         extracted = self._cv_extractor.extract_from_file(
@@ -193,6 +183,130 @@ class ProfileImportService:
         run = self._repository.create_run(source.id, run_payload)
         self._session.commit()
         return self._to_run_response(run)
+
+    def enqueue_cv_import(
+        self,
+        *,
+        file_name: str,
+        content_type: str | None,
+        file_bytes: bytes,
+    ) -> ProfileImportRunResponse:
+        """Create one queued CV import run for background processing.
+
+        Args:
+            file_name: Original uploaded file name.
+            content_type: Uploaded content type.
+            file_bytes: Uploaded file bytes.
+
+        Returns:
+            Queued import run response.
+        """
+
+        _ = content_type
+        source, _source_path = self._create_cv_source(
+            file_name=file_name,
+            file_bytes=file_bytes,
+        )
+        queued_payload = ImportRunPayload(
+            extractor_name="queued",
+            extractor_version=None,
+            status="queued",
+            detected_language=None,
+            raw_text="",
+            structured_payload_json="{}",
+            fields=[],
+            conflicts=[],
+        )
+        run = self._repository.create_run(source.id, queued_payload)
+        self._session.commit()
+        return self._to_run_response(run)
+
+    def process_queued_cv_run(self, run_id: str) -> None:
+        """Process one queued CV run and replace it with extracted results.
+
+        Args:
+            run_id: Import run identifier.
+        """
+
+        run = self._repository.get_run(run_id)
+        if run is None:
+            return
+        if run.status not in {"queued", "failed"}:
+            return
+
+        source = run.source
+        if source.file_path is None:
+            self._repository.set_run_status(run, "failed")
+            self._session.commit()
+            return
+
+        source_path = Path(source.file_path)
+        if not source_path.exists():
+            self._repository.set_run_status(run, "failed")
+            self._session.commit()
+            return
+
+        self._repository.set_run_status(run, "running")
+        self._session.commit()
+
+        file_name = source.file_name or source_path.name
+
+        try:
+            extracted = self._cv_extractor.extract_from_file(
+                file_path=source_path,
+                file_name=file_name,
+                content_type=None,
+            )
+            run_payload = self._build_run_payload_from_text(
+                raw_text=extracted.text,
+                extractor_name=extracted.extractor_name,
+                extractor_version=extracted.extractor_version,
+                source_locator=file_name,
+                source_type="cv_document",
+                source_label=file_name,
+            )
+            self._repository.replace_run_extraction_result(run=run, payload=run_payload)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            failed_run = self._repository.get_run(run_id)
+            if failed_run is None:
+                return
+            self._repository.set_run_status(failed_run, "failed")
+            self._session.commit()
+
+    def _create_cv_source(
+        self,
+        *,
+        file_name: str,
+        file_bytes: bytes,
+    ) -> tuple[ProfileImportSourceModel, Path]:
+        """Create and persist one import source row for a CV upload.
+
+        Args:
+            file_name: Original uploaded file name.
+            file_bytes: Uploaded file bytes.
+
+        Returns:
+            Tuple of source row and persisted file path.
+        """
+
+        self._validate_cv_file_name(file_name)
+        source_path = self._persist_source_file(file_name=file_name, file_bytes=file_bytes)
+        checksum = compute_sha256_bytes(file_bytes)
+
+        source = self._repository.create_source(
+            ImportSourcePayload(
+                source_type="cv_document",
+                source_label=file_name,
+                file_name=file_name,
+                file_path=str(source_path),
+                source_url=None,
+                checksum_sha256=checksum,
+            )
+        )
+
+        return source, source_path
 
     def import_website(self, request: WebsiteImportRequest) -> ProfileImportRunResponse:
         """Create a website-based import run from public URL extraction.

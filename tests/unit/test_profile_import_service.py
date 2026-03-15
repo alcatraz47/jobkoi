@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.llm.contracts import ProfileImportExtractionResponse
 from app.schemas.profile_import import FieldDecisionInput, ProfileImportReviewRequest
-from app.services.profile_import_extractors import ExtractedTextResult, WebsitePageResult
+from app.services.profile_import_extractors import ExtractedTextResult, ProfileImportExtractionError, WebsitePageResult
 from app.services.profile_import_service import (
     ProfileImportRunNotFoundError,
     ProfileImportService,
@@ -240,3 +240,69 @@ def test_service_cv_import_merges_supported_llm_fields_only(
     assert run.extractor_name.endswith("+llm")
     values = [field.suggested_value for field in run.fields if field.suggested_value is not None]
     assert "Invented Skill" not in values
+
+
+class _FailingCvExtractor:
+    """Deterministic failing CV extractor for queue failure tests."""
+
+    def extract_from_file(
+        self,
+        *,
+        file_path,
+        file_name: str,
+        content_type: str | None,
+    ) -> ExtractedTextResult:
+        """Raise one extraction error for test assertions."""
+
+        _ = (file_path, file_name, content_type)
+        raise ProfileImportExtractionError("failed to parse cv")
+
+
+def test_service_enqueue_and_process_cv_import(db_session: Session, tmp_path) -> None:
+    """Queued CV import should transition from queued to extracted after processing."""
+
+    service = ProfileImportService(
+        db_session,
+        cv_extractor=_FakeCvExtractor(),
+        website_extractor=_FakeWebsiteExtractor(),
+        import_storage_dir=tmp_path,
+    )
+
+    queued = service.enqueue_cv_import(
+        file_name="resume.pdf",
+        content_type="application/pdf",
+        file_bytes=b"pdf-bytes",
+    )
+    assert queued.status == "queued"
+    assert queued.fields == []
+
+    service.process_queued_cv_run(queued.id)
+
+    processed = service.get_run(queued.id)
+    assert processed.status == "extracted"
+    assert processed.fields
+
+
+def test_service_enqueue_cv_import_marks_failed_on_extraction_error(
+    db_session: Session,
+    tmp_path,
+) -> None:
+    """Queued CV import should be marked failed when extractor raises."""
+
+    service = ProfileImportService(
+        db_session,
+        cv_extractor=_FailingCvExtractor(),
+        website_extractor=_FakeWebsiteExtractor(),
+        import_storage_dir=tmp_path,
+    )
+
+    queued = service.enqueue_cv_import(
+        file_name="resume.pdf",
+        content_type="application/pdf",
+        file_bytes=b"pdf-bytes",
+    )
+
+    service.process_queued_cv_run(queued.id)
+
+    failed = service.get_run(queued.id)
+    assert failed.status == "failed"

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
         sqlalchemy_echo: Enables SQL query echo logging when True.
         document_storage_dir: Local directory for generated document files.
         import_storage_dir: Local directory for import source file storage.
+        frontend_api_timeout_seconds: Frontend-to-backend HTTP timeout in seconds.
         profile_import_auto_approve_enabled: Enables confidence-based auto-approval.
         profile_import_auto_approve_min_confidence: Minimum confidence for auto-approval.
         profile_import_llm_enabled: Enables LLM-assisted import extraction stage.
@@ -49,6 +50,7 @@ class Settings(BaseSettings):
     sqlalchemy_echo: bool = Field(default=False)
     document_storage_dir: str = Field(default="storage/documents")
     import_storage_dir: str = Field(default="storage/imports")
+    frontend_api_timeout_seconds: float = Field(default=180.0, gt=0)
     profile_import_auto_approve_enabled: bool = Field(default=True)
     profile_import_auto_approve_min_confidence: int = Field(default=94, ge=0, le=100)
     profile_import_llm_enabled: bool = Field(default=False)
